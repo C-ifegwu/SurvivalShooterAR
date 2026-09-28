@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DG.Tweening;
 using SurvivalShooter.Core;
 using SurvivalShooter.Audio;
 using SurvivalShooter.Data;
@@ -11,8 +12,8 @@ using SurvivalShooter.Player;
 namespace SurvivalShooter.UI
 {
     /// <summary>
-    /// Comprehensive UI Manager coordinating Start Menu, HUD, End-Game Summary, and Local Leaderboard.
-    /// Operates via the Observer Pattern by subscribing to decoupled GameEvents.
+    /// Master UI Manager coordinating Start Menu, HUD, End-Game Summary, and Local Leaderboard.
+    /// Fully animated using DOTween for premium visual polish, micro-interactions, and reactive gameplay feedback.
     /// </summary>
     public class UIManager : MonoBehaviour
     {
@@ -30,9 +31,11 @@ namespace SurvivalShooter.UI
         [SerializeField] private Button difficultyNormalButton;
         [SerializeField] private Button difficultyHardButton;
         [SerializeField] private TextMeshProUGUI planeStatusText;
+        [SerializeField] private TextMeshProUGUI gameTitleText;
 
         [Header("In-Game HUD Elements")]
         [SerializeField] private Slider healthSlider;
+        [SerializeField] private Image healthFillImage;
         [SerializeField] private TextMeshProUGUI healthText;
         [SerializeField] private TextMeshProUGUI scoreText;
         [SerializeField] private TextMeshProUGUI timeRemainingText;
@@ -55,7 +58,17 @@ namespace SurvivalShooter.UI
         [SerializeField] private TextMeshProUGUI leaderboardRawText;
         [SerializeField] private Button closeLeaderboardButton;
 
-        private Coroutine damageFlashCoroutine;
+        private Tween healthTween;
+        private Tween scoreTween;
+        private Tween timerPulseTween;
+        private Tween startPulseTween;
+        private Tween vignetteTween;
+        private Tween endSummaryTween;
+        private Tween leaderboardTween;
+
+        private readonly Color fullHealthColor = new Color(0f, 1f, 0.55f, 1f);       // Neon emerald
+        private readonly Color mediumHealthColor = new Color(1f, 0.72f, 0.1f, 1f);    // Amber gold
+        private readonly Color criticalHealthColor = new Color(1f, 0.2f, 0.2f, 1f);   // Crimson red
 
         private void Awake()
         {
@@ -65,7 +78,15 @@ namespace SurvivalShooter.UI
                 return;
             }
             Instance = this;
+
             SetupButtonListeners();
+            AttachButtonPolishComponents();
+            ResolveHealthFillImage();
+        }
+
+        private void Start()
+        {
+            InitializeAnimations();
         }
 
         private void OnEnable()
@@ -86,6 +107,61 @@ namespace SurvivalShooter.UI
             GameEvents.OnScoreChanged -= HandleScoreChanged;
             GameEvents.OnTimeRemainingUpdated -= HandleTimeRemainingUpdated;
             GameEvents.OnPlaneDetectedStatusChanged -= HandlePlaneStatusChanged;
+
+            KillAllTweens();
+        }
+
+        private void KillAllTweens()
+        {
+            healthTween?.Kill();
+            scoreTween?.Kill();
+            timerPulseTween?.Kill();
+            startPulseTween?.Kill();
+            vignetteTween?.Kill();
+            endSummaryTween?.Kill();
+            leaderboardTween?.Kill();
+        }
+
+        private void ResolveHealthFillImage()
+        {
+            if (healthFillImage == null && healthSlider != null && healthSlider.fillRect != null)
+            {
+                healthFillImage = healthSlider.fillRect.GetComponent<Image>();
+            }
+        }
+
+        private void AttachButtonPolishComponents()
+        {
+            Button[] allButtons = { startButton, leaderboardButton, difficultyNormalButton, difficultyHardButton,
+                                    shootButton, restartButton, mainMenuButton, endLeaderboardButton, closeLeaderboardButton };
+
+            foreach (var btn in allButtons)
+            {
+                if (btn != null && btn.GetComponent<UIButtonPolish>() == null)
+                {
+                    btn.gameObject.AddComponent<UIButtonPolish>();
+                }
+            }
+        }
+
+        private void InitializeAnimations()
+        {
+            if (startButton != null)
+            {
+                startPulseTween?.Kill();
+                startPulseTween = startButton.transform.DOScale(1.06f, 0.9f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(-1, LoopType.Yoyo)
+                    .SetUpdate(true);
+            }
+
+            if (gameTitleText != null)
+            {
+                gameTitleText.transform.DOScale(1.03f, 1.4f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(-1, LoopType.Yoyo)
+                    .SetUpdate(true);
+            }
         }
 
         private void SetupButtonListeners()
@@ -94,28 +170,8 @@ namespace SurvivalShooter.UI
             {
                 startButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
+                    AudioManager.Instance?.PlayWhoosh();
                     if (GameManager.Instance != null) GameManager.Instance.StartGamePlacementFlow();
-                });
-            }
-
-            if (difficultyNormalButton != null)
-            {
-                difficultyNormalButton.onClick.AddListener(() =>
-                {
-                    PlayButtonSound();
-                    if (GameManager.Instance != null) GameManager.Instance.SetDifficulty(DifficultyLevel.Normal);
-                    HighlightDifficulty(DifficultyLevel.Normal);
-                });
-            }
-
-            if (difficultyHardButton != null)
-            {
-                difficultyHardButton.onClick.AddListener(() =>
-                {
-                    PlayButtonSound();
-                    if (GameManager.Instance != null) GameManager.Instance.SetDifficulty(DifficultyLevel.Hard);
-                    HighlightDifficulty(DifficultyLevel.Hard);
                 });
             }
 
@@ -123,26 +179,28 @@ namespace SurvivalShooter.UI
             {
                 leaderboardButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
+                    AudioManager.Instance?.PlayMechanical();
                     OpenLeaderboard();
                 });
             }
 
-            if (endLeaderboardButton != null)
+            if (difficultyNormalButton != null)
             {
-                endLeaderboardButton.onClick.AddListener(() =>
+                difficultyNormalButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
-                    OpenLeaderboard();
+                    AudioManager.Instance?.PlayPunch();
+                    if (GameManager.Instance != null) GameManager.Instance.SetDifficulty(DifficultyLevel.Normal);
+                    UpdateDifficultyButtonVisuals(DifficultyLevel.Normal);
                 });
             }
 
-            if (closeLeaderboardButton != null)
+            if (difficultyHardButton != null)
             {
-                closeLeaderboardButton.onClick.AddListener(() =>
+                difficultyHardButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
-                    CloseLeaderboard();
+                    AudioManager.Instance?.PlayPunch();
+                    if (GameManager.Instance != null) GameManager.Instance.SetDifficulty(DifficultyLevel.Hard);
+                    UpdateDifficultyButtonVisuals(DifficultyLevel.Hard);
                 });
             }
 
@@ -158,7 +216,7 @@ namespace SurvivalShooter.UI
             {
                 restartButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
+                    AudioManager.Instance?.PlayWhoosh();
                     if (GameManager.Instance != null) GameManager.Instance.RestartGame();
                 });
             }
@@ -167,43 +225,100 @@ namespace SurvivalShooter.UI
             {
                 mainMenuButton.onClick.AddListener(() =>
                 {
-                    PlayButtonSound();
+                    AudioManager.Instance?.PlayWhoosh();
                     if (GameManager.Instance != null) GameManager.Instance.ReturnToMainMenu();
                 });
             }
+
+            if (endLeaderboardButton != null)
+            {
+                endLeaderboardButton.onClick.AddListener(() =>
+                {
+                    AudioManager.Instance?.PlayMechanical();
+                    OpenLeaderboard();
+                });
+            }
+
+            if (closeLeaderboardButton != null)
+            {
+                closeLeaderboardButton.onClick.AddListener(() =>
+                {
+                    AudioManager.Instance?.PlayPunch();
+                    CloseLeaderboard();
+                });
+            }
+
+            UpdateDifficultyButtonVisuals(DifficultyLevel.Normal);
         }
 
-        private void PlayButtonSound()
+        private void UpdateDifficultyButtonVisuals(DifficultyLevel level)
         {
-            if (AudioManager.Instance != null) AudioManager.Instance.PlayButtonClick();
-        }
-
-        private void HighlightDifficulty(DifficultyLevel level)
-        {
-            Color activeColor = new Color(0f, 0.9f, 1f, 1f);
-            Color normalColor = new Color(0.7f, 0.7f, 0.7f, 1f);
+            Color activeColor = new Color(0f, 0.95f, 1f, 1f);
+            Color inactiveColor = new Color(0.55f, 0.55f, 0.6f, 1f);
 
             if (difficultyNormalButton != null)
             {
-                difficultyNormalButton.image.color = (level == DifficultyLevel.Normal) ? activeColor : normalColor;
+                difficultyNormalButton.image.color = (level == DifficultyLevel.Normal) ? activeColor : inactiveColor;
+                difficultyNormalButton.transform.DOScale((level == DifficultyLevel.Normal) ? 1.05f : 1f, 0.2f).SetUpdate(true);
             }
             if (difficultyHardButton != null)
             {
-                difficultyHardButton.image.color = (level == DifficultyLevel.Hard) ? activeColor : normalColor;
+                difficultyHardButton.image.color = (level == DifficultyLevel.Hard) ? activeColor : inactiveColor;
+                difficultyHardButton.transform.DOScale((level == DifficultyLevel.Hard) ? 1.05f : 1f, 0.2f).SetUpdate(true);
             }
         }
 
         private void HandleGameStateChanged(GameState state)
         {
-            if (startMenuPanel != null) startMenuPanel.SetActive(state == GameState.ScanningPlanes || state == GameState.PlacementReady);
-            if (inGamePanel != null) inGamePanel.SetActive(state == GameState.Playing);
-            if (endGamePanel != null) endGamePanel.SetActive(state == GameState.GameOver || state == GameState.Victory);
-            if (leaderboardPanel != null) leaderboardPanel.SetActive(false);
+            bool showStart = (state == GameState.ScanningPlanes || state == GameState.PlacementReady);
+            bool showInGame = (state == GameState.Playing);
+            bool showEnd = (state == GameState.GameOver || state == GameState.Victory);
 
-            if (state == GameState.GameOver || state == GameState.Victory)
+            if (startMenuPanel != null)
             {
-                PopulateEndGameSummary(state);
+                startMenuPanel.SetActive(showStart);
+                if (showStart)
+                {
+                    startMenuPanel.transform.localScale = Vector3.one * 0.95f;
+                    startMenuPanel.transform.DOScale(1f, 0.3f).SetEase(Ease.OutBack).SetUpdate(true);
+                }
             }
+
+            if (inGamePanel != null)
+            {
+                inGamePanel.SetActive(showInGame);
+                if (showInGame)
+                {
+                    inGamePanel.transform.localScale = Vector3.one;
+                }
+            }
+
+            if (endGamePanel != null)
+            {
+                endGamePanel.SetActive(showEnd);
+                if (showEnd)
+                {
+                    AnimateEndGameEntrance(state);
+                }
+            }
+
+            if (leaderboardPanel != null)
+            {
+                leaderboardPanel.SetActive(false);
+            }
+        }
+
+        private void AnimateEndGameEntrance(GameState state)
+        {
+            if (endGamePanel == null) return;
+
+            endSummaryTween?.Kill();
+            endGamePanel.transform.localScale = Vector3.zero;
+            endSummaryTween = endGamePanel.transform.DOScale(1f, 0.45f)
+                .SetEase(Ease.OutBack)
+                .SetUpdate(true);
+
+            PopulateEndGameSummary(state);
         }
 
         private void PopulateEndGameSummary(GameState state)
@@ -214,25 +329,62 @@ namespace SurvivalShooter.UI
             {
                 endTitleText.text = (state == GameState.Victory) ? "MISSION COMPLETE" : "SURVIVAL FAILED";
                 endTitleText.color = (state == GameState.Victory) ? new Color(0.2f, 1f, 0.4f) : new Color(1f, 0.25f, 0.25f);
+                endTitleText.transform.DOPunchScale(Vector3.one * 0.25f, 0.4f, 4, 0.5f).SetUpdate(true);
             }
 
-            if (finalScoreText != null) finalScoreText.text = $"FINAL SCORE: {GameManager.Instance.CurrentScore}";
+            int targetScore = GameManager.Instance.CurrentScore;
+            if (finalScoreText != null)
+            {
+                int currentDisplay = 0;
+                DOTween.To(() => currentDisplay, x =>
+                {
+                    currentDisplay = x;
+                    finalScoreText.text = $"FINAL SCORE: {x:N0}";
+                }, targetScore, 1.1f)
+                .SetEase(Ease.OutCubic)
+                .SetUpdate(true);
+            }
+
             if (enemiesDefeatedText != null) enemiesDefeatedText.text = $"ENEMIES ELIMINATED: {GameManager.Instance.EnemiesDefeated}";
+
             if (timeSurvivedText != null)
             {
                 int minutes = Mathf.FloorToInt(GameManager.Instance.TimeSurvived / 60f);
                 int seconds = Mathf.FloorToInt(GameManager.Instance.TimeSurvived % 60f);
                 timeSurvivedText.text = $"TIME SURVIVED: {minutes:00}:{seconds:00}";
             }
-            if (difficultyPlayedText != null) difficultyPlayedText.text = $"DIFFICULTY: {GameManager.Instance.SelectedDifficulty.ToString().ToUpper()}";
+
+            if (difficultyPlayedText != null)
+            {
+                difficultyPlayedText.text = $"DIFFICULTY: {GameManager.Instance.SelectedDifficulty.ToString().ToUpper()}";
+            }
         }
 
         private void HandlePlayerHealthChanged(int current, int max)
         {
+            float targetValue = Mathf.Clamp(current, 0, max);
+
             if (healthSlider != null)
             {
                 healthSlider.maxValue = max;
-                healthSlider.value = current;
+                healthTween?.Kill();
+                healthTween = healthSlider.DOValue(targetValue, 0.22f)
+                    .SetEase(Ease.OutCubic);
+            }
+
+            if (healthFillImage != null && max > 0)
+            {
+                float ratio = (float)current / max;
+                Color targetColor;
+                if (ratio > 0.5f)
+                {
+                    targetColor = Color.Lerp(mediumHealthColor, fullHealthColor, (ratio - 0.5f) * 2f);
+                }
+                else
+                {
+                    targetColor = Color.Lerp(criticalHealthColor, mediumHealthColor, ratio * 2f);
+                }
+                healthFillImage.DOColor(targetColor, 0.25f);
             }
 
             if (healthText != null)
@@ -245,26 +397,16 @@ namespace SurvivalShooter.UI
         {
             if (damageVignetteImage != null)
             {
-                if (damageFlashCoroutine != null) StopCoroutine(damageFlashCoroutine);
-                damageFlashCoroutine = StartCoroutine(DamageFlashRoutine());
+                vignetteTween?.Kill();
+                damageVignetteImage.color = new Color(1f, 0f, 0f, 0.65f);
+                vignetteTween = damageVignetteImage.DOFade(0f, 0.35f).SetEase(Ease.OutQuad);
             }
-        }
 
-        private IEnumerator DamageFlashRoutine()
-        {
-            if (damageVignetteImage != null) damageVignetteImage.color = new Color(1f, 0f, 0f, 0.85f);
-            float duration = 0.35f;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
+            Camera cam = Camera.main;
+            if (cam != null)
             {
-                elapsed += Time.deltaTime;
-                if (damageVignetteImage != null) damageVignetteImage.color = new Color(1f, 0f, 0f, Mathf.Lerp(0.85f, 0f, elapsed / duration));
-                yield return null;
+                cam.transform.DOShakePosition(0.22f, 0.16f, 15, 90f);
             }
-
-            if (damageVignetteImage != null) damageVignetteImage.color = new Color(1f, 0f, 0f, 0f);
-            damageFlashCoroutine = null;
         }
 
         private void HandleScoreChanged(int totalScore)
@@ -272,6 +414,8 @@ namespace SurvivalShooter.UI
             if (scoreText != null)
             {
                 scoreText.text = $"SCORE: {totalScore}";
+                scoreTween?.Kill();
+                scoreTween = scoreText.transform.DOPunchScale(Vector3.one * 0.32f, 0.2f, 4, 0.5f);
             }
         }
 
@@ -282,6 +426,19 @@ namespace SurvivalShooter.UI
                 int minutes = Mathf.FloorToInt(timeRemaining / 60f);
                 int seconds = Mathf.FloorToInt(timeRemaining % 60f);
                 timeRemainingText.text = $"TIME: {minutes:00}:{seconds:00}";
+
+                if (timeRemaining <= 10f && timeRemaining > 0f)
+                {
+                    timeRemainingText.color = new Color(1f, 0.25f, 0.25f, 1f);
+                    if (timerPulseTween == null || !timerPulseTween.IsActive())
+                    {
+                        timerPulseTween = timeRemainingText.transform.DOPunchScale(Vector3.one * 0.25f, 0.25f, 2, 0.5f);
+                    }
+                }
+                else
+                {
+                    timeRemainingText.color = new Color(0.9f, 0.95f, 1f, 1f);
+                }
             }
         }
 
@@ -289,10 +446,15 @@ namespace SurvivalShooter.UI
         {
             if (planeStatusText != null)
             {
-                planeStatusText.text = hasPlane 
+                planeStatusText.text = hasPlane
                     ? "HORIZONTAL PLANE ACQUIRED\nTAP SCREEN TO ESTABLISH COMBAT ZONE"
                     : "SCANNING ENVIRONMENT...\nMOVE DEVICE OVER FLAT FLOOR OR TABLE";
                 planeStatusText.color = hasPlane ? new Color(0f, 1f, 0.8f) : new Color(1f, 0.8f, 0.2f);
+
+                if (hasPlane)
+                {
+                    planeStatusText.transform.DOPunchScale(Vector3.one * 0.15f, 0.3f, 3, 0.5f);
+                }
             }
         }
 
@@ -301,6 +463,12 @@ namespace SurvivalShooter.UI
             if (leaderboardPanel != null)
             {
                 leaderboardPanel.SetActive(true);
+                leaderboardTween?.Kill();
+                leaderboardPanel.transform.localScale = Vector3.zero;
+                leaderboardTween = leaderboardPanel.transform.DOScale(1f, 0.35f)
+                    .SetEase(Ease.OutBack)
+                    .SetUpdate(true);
+
                 PopulateLeaderboard();
             }
         }
@@ -309,7 +477,11 @@ namespace SurvivalShooter.UI
         {
             if (leaderboardPanel != null)
             {
-                leaderboardPanel.SetActive(false);
+                leaderboardTween?.Kill();
+                leaderboardTween = leaderboardPanel.transform.DOScale(0f, 0.22f)
+                    .SetEase(Ease.InBack)
+                    .SetUpdate(true)
+                    .OnComplete(() => leaderboardPanel.SetActive(false));
             }
         }
 
@@ -322,7 +494,7 @@ namespace SurvivalShooter.UI
             if (leaderboardRawText != null)
             {
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
-                sb.AppendLine("=== LATEST 5 SESSIONS ===");
+                sb.AppendLine("=== LATEST 5 BATTLE SESSIONS ===");
                 sb.AppendLine();
 
                 if (entries.Count == 0)
@@ -352,7 +524,8 @@ namespace SurvivalShooter.UI
             Button fireBtn, Image vignetteImage,
             TextMeshProUGUI endTitle, TextMeshProUGUI finalScore, TextMeshProUGUI enemiesKilled,
             TextMeshProUGUI timeSurv, TextMeshProUGUI diffPlayed, Button restartBtn, Button mainBtn,
-            Button endLeadBtn, TextMeshProUGUI rawRecordTxt, Button closeLeadBtn)
+            Button endLeadBtn, TextMeshProUGUI rawRecordTxt, Button closeLeadBtn,
+            TextMeshProUGUI titleTxt = null)
         {
             startMenuPanel = startPanel;
             inGamePanel = inGame;
@@ -364,6 +537,7 @@ namespace SurvivalShooter.UI
             difficultyNormalButton = normBtn;
             difficultyHardButton = hardBtn;
             planeStatusText = planeStatus;
+            gameTitleText = titleTxt;
 
             healthSlider = hpSlider;
             healthText = hpTxt;
@@ -384,7 +558,10 @@ namespace SurvivalShooter.UI
             leaderboardRawText = rawRecordTxt;
             closeLeaderboardButton = closeLeadBtn;
 
+            ResolveHealthFillImage();
+            AttachButtonPolishComponents();
             SetupButtonListeners();
+            InitializeAnimations();
         }
     }
 }

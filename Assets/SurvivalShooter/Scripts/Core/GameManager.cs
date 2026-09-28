@@ -12,6 +12,7 @@ namespace SurvivalShooter.Core
     /// <summary>
     /// Master Game Manager implementing the State Pattern and Singleton Pattern.
     /// Governs complete game loop (Start -> Play -> End), score tallying, time limits, and session persistence.
+    /// Coordinates seamless background music and state transitions.
     /// </summary>
     public class GameManager : MonoBehaviour
     {
@@ -67,6 +68,12 @@ namespace SurvivalShooter.Core
         {
             SetDifficulty(DifficultyLevel.Normal);
             SetState(GameState.ScanningPlanes);
+
+            // Start ambient menu music
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayMenuBGM();
+            }
         }
 
         public void SetDifficulty(DifficultyLevel level)
@@ -128,9 +135,11 @@ namespace SurvivalShooter.Core
 
             SetState(GameState.Playing);
 
+            // Switch to high-energy combat action BGM
             if (AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayGameStart();
+                AudioManager.Instance.PlayCombatBGM();
             }
         }
 
@@ -183,6 +192,11 @@ namespace SurvivalShooter.Core
         {
             isTimerRunning = false;
             SetState(GameState.GameOver);
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayDefeat();
+            }
 
             SaveSessionToLeaderboard();
         }
@@ -258,6 +272,11 @@ namespace SurvivalShooter.Core
             }
 
             SetState(GameState.ScanningPlanes);
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayMenuBGM();
+            }
         }
     }
 }

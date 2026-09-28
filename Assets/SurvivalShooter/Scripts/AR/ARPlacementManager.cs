@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
+using DG.Tweening;
 using SurvivalShooter.Core;
 
 namespace SurvivalShooter.AR
@@ -10,6 +11,7 @@ namespace SurvivalShooter.AR
     /// <summary>
     /// Handles AR Plane detection, Placement Reticle tracking, and Tap-to-Place functionality.
     /// Strictly guarantees single-placement constraint and disables plane detection post-placement.
+    /// Includes complete Unity Editor Play Mode simulation for rapid desktop testing.
     /// </summary>
     public class ARPlacementManager : MonoBehaviour
     {
@@ -28,6 +30,7 @@ namespace SurvivalShooter.AR
         private bool isPlaneDetected;
         private bool isObjectPlaced;
         private readonly List<ARRaycastHit> raycastHits = new List<ARRaycastHit>();
+        private Tween reticlePulseTween;
 
         public bool IsObjectPlaced => isObjectPlaced;
         public bool IsPlaneDetected => isPlaneDetected;
@@ -58,7 +61,18 @@ namespace SurvivalShooter.AR
             {
                 placementIndicatorInstance = Instantiate(placementIndicatorPrefab);
                 placementIndicatorInstance.SetActive(false);
+
+                // Add visual reticle pulsing animation
+                reticlePulseTween = placementIndicatorInstance.transform.DOScale(1.08f, 0.75f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(-1, LoopType.Yoyo)
+                    .SetUpdate(true);
             }
+        }
+
+        private void OnDestroy()
+        {
+            reticlePulseTween?.Kill();
         }
 
         private void Update()
@@ -79,39 +93,36 @@ namespace SurvivalShooter.AR
 
         private void UpdatePlacementPose()
         {
-            if (raycastManager == null)
+            bool hitPlane = false;
+
+            if (raycastManager != null)
             {
-                // Fallback for editor simulation
-                SimulateEditorPlacementPose();
-                return;
+                Vector2 screenCenter = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+                if (raycastManager.Raycast(screenCenter, raycastHits, TrackableType.PlaneWithinPolygon))
+                {
+                    currentPlacementPose = raycastHits[0].pose;
+                    hitPlane = true;
+                }
             }
 
-            Vector2 screenCenter = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            #if UNITY_EDITOR || UNITY_STANDALONE
+            // Desktop Editor Play Mode Fallback: Automatically simulate floor plane in front of camera
+            if (!hitPlane)
+            {
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    Vector3 forwardFloor = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up).normalized;
+                    if (forwardFloor.sqrMagnitude < 0.01f) forwardFloor = Vector3.forward;
 
-            // Raycast against horizontal planes only
-            if (raycastManager.Raycast(screenCenter, raycastHits, TrackableType.PlaneWithinPolygon))
-            {
-                currentPlacementPose = raycastHits[0].pose;
-                SetPlaneDetected(true);
-            }
-            else
-            {
-                SetPlaneDetected(false);
-            }
-        }
-
-        private void SimulateEditorPlacementPose()
-        {
-            #if UNITY_EDITOR
-            // In editor play mode, place a simulated pose 2 meters ahead
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                currentPlacementPose.position = cam.transform.position + cam.transform.forward * 2.0f + Vector3.down * 1.0f;
-                currentPlacementPose.rotation = Quaternion.identity;
-                SetPlaneDetected(true);
+                    currentPlacementPose.position = cam.transform.position + forwardFloor * 2.2f + Vector3.down * 0.8f;
+                    currentPlacementPose.rotation = Quaternion.LookRotation(forwardFloor, Vector3.up);
+                    hitPlane = true;
+                }
             }
             #endif
+
+            SetPlaneDetected(hitPlane);
         }
 
         private void SetPlaneDetected(bool detected)
@@ -129,12 +140,18 @@ namespace SurvivalShooter.AR
 
             if (isPlaneDetected && !isObjectPlaced)
             {
-                placementIndicatorInstance.SetActive(true);
+                if (!placementIndicatorInstance.activeSelf)
+                {
+                    placementIndicatorInstance.SetActive(true);
+                }
                 placementIndicatorInstance.transform.SetPositionAndRotation(currentPlacementPose.position, currentPlacementPose.rotation);
             }
             else
             {
-                placementIndicatorInstance.SetActive(false);
+                if (placementIndicatorInstance.activeSelf)
+                {
+                    placementIndicatorInstance.SetActive(false);
+                }
             }
         }
 
@@ -145,12 +162,17 @@ namespace SurvivalShooter.AR
             bool tapTriggered = false;
 
             #if UNITY_EDITOR || UNITY_STANDALONE
+            // In Editor, click anywhere in game view or press Space/Enter to place
             if (Input.GetMouseButtonDown(0))
             {
-                if (!EventSystem.current.IsPointerOverGameObject())
+                if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject())
                 {
                     tapTriggered = true;
                 }
+            }
+            else if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))
+            {
+                tapTriggered = true;
             }
             #else
             if (Input.touchCount > 0)
@@ -158,7 +180,7 @@ namespace SurvivalShooter.AR
                 Touch touch = Input.GetTouch(0);
                 if (touch.phase == TouchPhase.Began)
                 {
-                    if (!EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                    if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject(touch.fingerId))
                     {
                         tapTriggered = true;
                     }
@@ -177,7 +199,7 @@ namespace SurvivalShooter.AR
             if (isObjectPlaced) return; // Strict single-instance constraint
 
             isObjectPlaced = true;
-            Debug.Log($"[ARPlacementManager] Game World placed at {position}. Freezing plane detection.");
+            Debug.Log($"[ARPlacementManager] Combat Zone successfully anchored at {position}. Locking plane tracking.");
 
             // Spawn visual arena bounds/perimeter if assigned
             if (combatArenaPrefab != null)
@@ -197,10 +219,9 @@ namespace SurvivalShooter.AR
                 planeManager.requestedDetectionMode = PlaneDetectionMode.None;
             }
 
-            // Dispatch global event
+            // Dispatch global events
             GameEvents.TriggerGameWorldPlaced(position);
 
-            // Notify GameManager
             if (GameManager.Instance != null)
             {
                 GameManager.Instance.OnPlacementComplete();

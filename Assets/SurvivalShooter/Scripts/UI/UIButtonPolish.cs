@@ -13,12 +13,12 @@ namespace SurvivalShooter.UI
     [RequireComponent(typeof(Button))]
     public class UIButtonPolish : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler, IPointerClickHandler
     {
-        [Header( Animation Settings)]
+        [Header("Animation Settings")]
         [SerializeField] private float hoverScaleMultiplier = 1.08f;
         [SerializeField] private float pressScaleMultiplier = 0.92f;
         [SerializeField] private float animDuration = 0.18f;
 
-        [Header(Sound Options)]
+        [Header("Sound Options")]
         [SerializeField] private bool playSoundOnClick = true;
         [SerializeField] private bool playSoundOnHover = true;
 

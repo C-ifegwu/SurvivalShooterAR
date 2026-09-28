@@ -12,38 +12,38 @@ namespace SurvivalShooter.Audio
     {
         public static AudioManager Instance { get; private set; }
 
-        [Header( Audio Clips - Mandatory Combat)]
+        [Header("Audio Clips - Mandatory Combat")]
         [SerializeField] private AudioClip playerShootClip;
         [SerializeField] private AudioClip playerDeathClip;
         [SerializeField] private AudioClip enemySpawnClip;
         [SerializeField] private AudioClip enemyShootClip;
         [SerializeField] private AudioClip enemyMeleeDamageClip;
 
-        [Header(Audio Clips - Combat Polish)]
+        [Header("Audio Clips - Combat Polish")]
         [SerializeField] private AudioClip enemyHurtClip;
         [SerializeField] private AudioClip enemyDeathClip;
         [SerializeField] private AudioClip gameStartClip;
         [SerializeField] private AudioClip victoryFanfareClip;
         [SerializeField] private AudioClip defeatClip;
 
-        [Header(Audio Clips - UI Polish)]
+        [Header("Audio Clips - UI Polish")]
         [SerializeField] private AudioClip uiButtonClickClip;
         [SerializeField] private AudioClip uiButtonHoverClip;
         [SerializeField] private AudioClip uiWhooshClip;
         [SerializeField] private AudioClip uiPunchClip;
         [SerializeField] private AudioClip uiMechanicalClip;
 
-        [Header(Audio Clips - Background Music)]
+        [Header("Audio Clips - Background Music")]
         [SerializeField] private AudioClip menuBgmClip;
         [SerializeField] private AudioClip combatBgmClip;
 
-        [Header(Audio Channels)]
+        [Header("Audio Channels")]
         [SerializeField] private AudioSource playerChannel;
         [SerializeField] private AudioSource enemyChannel;
         [SerializeField] private AudioSource uiChannel;
         [SerializeField] private AudioSource musicChannel;
 
-        [Header(Volume Settings)]
+        [Header("Volume Settings")]
         [Range(0f, 1f)] [SerializeField] private float musicVolume = 0.45f;
         [Range(0f, 1f)] [SerializeField] private float sfxVolume = 0.85f;
 
@@ -268,7 +268,6 @@ namespace SurvivalShooter.Audio
             source.PlayOneShot(clip, volume);
         }
 
-        // Configuration helper for Editor setup
         public void ConfigureClips(
             AudioClip playerShoot,
             AudioClip playerDeath,

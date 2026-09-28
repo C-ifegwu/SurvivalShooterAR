@@ -82,7 +82,7 @@ TrailRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 123d27542cf35e243996838cc7d2a2e0, type: 2}
+  - {fileID: 2100000, guid: e0a236eca6a53184496ec08b29ade4e2, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -191,7 +191,7 @@ MonoBehaviour:
   damage: 10
   maxLifetime: 3.5
   isPlayerProjectile: 0
-  trailRenderer: {fileID: 0}
+  trailRenderer: {fileID: 2933089274221276542}
   impactEffectPrefab: {fileID: 0}
 --- !u!1 &3778444650916019402
 GameObject:
@@ -259,7 +259,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 123d27542cf35e243996838cc7d2a2e0, type: 2}
+  - {fileID: 2100000, guid: e0a236eca6a53184496ec08b29ade4e2, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

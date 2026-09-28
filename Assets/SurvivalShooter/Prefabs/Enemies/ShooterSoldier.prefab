@@ -1,5 +1,36 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1426627266424468412
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4866700865713203724}
+  m_Layer: 0
+  m_Name: MuzzlePoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4866700865713203724
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1426627266424468412}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0.2, y: 1.2, z: 0.5}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3749594232032720069}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6540257692097443097
 GameObject:
   m_ObjectHideFlags: 0
@@ -87,12 +118,19 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: bd98bf835ef985b479e9ef674ad8cd60, type: 2}
+    - target: {fileID: 4945628578957348611, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 4945628578945621535, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
       insertIndex: -1
       addedObject: {fileID: 416998983435725782}
+    - targetCorrespondingSourceObject: {fileID: 4945628578945621535, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 4866700865713203724}
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 4945628578945778303, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
       insertIndex: -1
@@ -146,16 +184,27 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82e5d32ff2cc93844b00e27b2dc09c46, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SurvivalShooter.Enemies.ShooterEnemy
-  enemyType: 0
+  enemyType: 1
   maxHealth: 50
   moveSpeed: 1
   attackRange: 4
   attackCooldown: 2.2
   attackDamage: 10
   scoreValue: 250
-  animator: {fileID: 0}
-  enemyCollider: {fileID: 0}
-  renderers: []
+  animator: {fileID: 3749594232042494745}
+  enemyCollider: {fileID: 405190608246826611}
+  renderers:
+  - {fileID: 3749594232046675417}
   muzzlePoint: {fileID: 416998983435725782}
   projectilePoolTag: EnemyProjectile
   muzzleFlashDuration: 0.08
+--- !u!95 &3749594232042494745 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 4945628578953048515, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
+  m_PrefabInstance: {fileID: 8118682719488781018}
+  m_PrefabAsset: {fileID: 0}
+--- !u!137 &3749594232046675417 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: 4945628578957348611, guid: b0d15748d7c36be4da7224de0a215c55, type: 3}
+  m_PrefabInstance: {fileID: 8118682719488781018}
+  m_PrefabAsset: {fileID: 0}

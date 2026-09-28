@@ -48,9 +48,25 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -7823293702887809713, guid: fd9fceffae8018a41809676305b26595, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: -3470603608567443987, guid: fd9fceffae8018a41809676305b26595, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: -1359310224657188892, guid: fd9fceffae8018a41809676305b26595, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: fd9fceffae8018a41809676305b26595, type: 3}
       propertyPath: m_Name
       value: MeleeZombie
+      objectReference: {fileID: 0}
+    - target: {fileID: 2321523695958950486, guid: fd9fceffae8018a41809676305b26595, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -111,6 +127,30 @@ MonoBehaviour:
   attackDamage: 15
   scoreValue: 100
   animator: {fileID: 0}
-  enemyCollider: {fileID: 0}
-  renderers: []
+  enemyCollider: {fileID: 4980216857155091181}
+  renderers:
+  - {fileID: 2839554843192918486}
+  - {fileID: 7673385103925998692}
+  - {fileID: 5227102408725630573}
+  - {fileID: 1455091790332452559}
   strikeDelay: 0.35
+--- !u!137 &1455091790332452559 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: -7823293702887809713, guid: fd9fceffae8018a41809676305b26595, type: 3}
+  m_PrefabInstance: {fileID: 531307751314817920}
+  m_PrefabAsset: {fileID: 0}
+--- !u!137 &2839554843192918486 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: 2321523695958950486, guid: fd9fceffae8018a41809676305b26595, type: 3}
+  m_PrefabInstance: {fileID: 531307751314817920}
+  m_PrefabAsset: {fileID: 0}
+--- !u!137 &5227102408725630573 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: -3470603608567443987, guid: fd9fceffae8018a41809676305b26595, type: 3}
+  m_PrefabInstance: {fileID: 531307751314817920}
+  m_PrefabAsset: {fileID: 0}
+--- !u!137 &7673385103925998692 stripped
+SkinnedMeshRenderer:
+  m_CorrespondingSourceObject: {fileID: -1359310224657188892, guid: fd9fceffae8018a41809676305b26595, type: 3}
+  m_PrefabInstance: {fileID: 531307751314817920}
+  m_PrefabAsset: {fileID: 0}

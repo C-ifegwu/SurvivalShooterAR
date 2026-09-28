@@ -1,4 +1,4 @@
-﻿# Survival Shooter: Custom AR Plane Tracking Combat Experience
+# Survival Shooter: Custom AR Plane Tracking Combat Experience
 **Technical Architecture & Engineering Documentation**  
 **Student Name:** Chibueze Victor Ifegwu  
 **Course Module:** Mobile Augmented Reality Development  
@@ -120,13 +120,17 @@ Audio playback is centralized in `AudioManager` to avoid duplicate `AudioSource`
 - **Channel Separation**: Four shared channels are maintained: Player SFX (2D), Enemy SFX (2D with pitch variation), UI Audio, and Ambient Audio.
 - **Acoustic Fatigue Prevention**: `PlayWithPitchVariation()` dynamically modulates playback pitch between 0.85x and 1.15x for gunshots, enemy groans, and zombie bites.
 
-### Gameplay Sound Mapping
-1. **Player Shoot**: `Assets/Laser Weapons Sound Pack/Free/light_blast_1.wav`
-2. **Player Death**: `Assets/ZombieHorrorPackageFree/WAV/BodyFall/Foley_BodyFall_001.wav`
-3. **Enemy Spawn**: `Assets/ZombieHorrorPackageFree/WAV/VO/Zombie01/Zombie001_Idle_A_001.wav`
-4. **Enemy Shoot (Shooter)**: `Assets/Laser Weapons Sound Pack/Free/heavy_blast_001.wav`
-5. **Enemy Damage (Melee Attack)**: `Assets/ZombieHorrorPackageFree/WAV/Bite/Zombie_Attack_Bite_001.wav`
-6. **Supplemental Polish**: `Button Pop.wav` (UI), `Zombie001_Hurt_A_001.wav` (Hit feedback), `Impact_Flesh_001.wav` (Kill sound).
+### Comprehensive Sound & BGM Mapping
+1. **Menu Ambient BGM**: `Assets/SurvivalShooter/Audio/Music/Ambient 1.wav` (calm atmospheric synth with volume crossfading)
+2. **Combat Action BGM**: `Assets/SurvivalShooter/Audio/Music/Action 1 (Loop).wav` (high-tempo rhythmic combat loop)
+3. **Player Shoot**: `Assets/Laser Weapons Sound Pack/Free/light_blast_1.wav` (procedural pitch modulation: 0.95x - 1.05x)
+4. **Player Death**: `Assets/ZombieHorrorPackageFree/WAV/BodyFall/Foley_BodyFall_001.wav`
+5. **Enemy Spawn**: `Assets/ZombieHorrorPackageFree/WAV/VO/Zombie01/Zombie001_Idle_A_001.wav`
+6. **Enemy Shoot (Shooter)**: `Assets/Laser Weapons Sound Pack/Free/heavy_blast_001.wav`
+7. **Enemy Damage (Melee Attack)**: `Assets/ZombieHorrorPackageFree/WAV/Bite/Zombie_Attack_Bite_001.wav`
+8. **Enemy Hurt & Death**: `Zombie001_Hurt_A_001.wav` & `Impact_Flesh_001.wav`
+9. **UI Micro-Interactions**: `Click Button SFX.wav`, `Hover Button SFX.wav`, `SFX_Click_Whoosh.mp3`, `SFX_Click_Punch.ogg`, `SFX_Click_Mechanical.mp3`
+10. **Game Round Outcomes**: `Victory.wav` (triumphant brass fanfare), `Death.wav` (defeat stinger)
 
 ---
 
@@ -156,3 +160,32 @@ The `LeaderboardManager` persists performance history across application launche
 Two distinct difficulty modes are configured in `DifficultySettings`:
 - **Cadet (Normal)**: 90s survival timer, 3.2s spawn intervals, 1.0x enemy speed, standard health (Melee: 20 HP / 2 hits; Shooter: 50 HP / 5 hits).
 - **Veteran (Hard)**: 120s survival timer, 2.0s spawn intervals, 1.35x enemy speed, 1.4x enemy health, 1.5x enemy damage.
+
+
+---
+
+## 9. UI Polish, Micro-Animations & DOTween Architecture
+
+The user interface was built to high visual and interactive standards using **DOTween (HOTween v2)**:
+
+- **Interactive Button Micro-Interactions (`UIButtonPolish.cs`)**:
+  - Implements `IPointerEnterHandler`, `IPointerExitHandler`, `IPointerDownHandler`, `IPointerUpHandler`, `IPointerClickHandler`.
+  - On hover: smooth scale-up to `1.08x` with `Ease.OutBack` and acoustic hover chirp.
+  - On press: punch down to `0.92x` with `Ease.OutQuad` and crisp mechanical click.
+  - Configured with `SetUpdate(true)` to guarantee responsiveness regardless of `Time.timeScale`.
+- **In-Game HUD Dynamic Feedback (`UIManager.cs`)**:
+  - **Dynamic Health Bar**: Interpolated via `healthSlider.DOValue(current, 0.22f, Ease.OutCubic)`. Health fill color smoothly shifts dynamically through three states: Emerald Green (>50%), Amber Gold (25-50%), and Crimson Red (<25%).
+  - **Score Punch Scaling**: `scoreText.transform.DOPunchScale(0.32x, 0.2s)` triggers whenever enemies are eliminated.
+  - **Critical Timer Urgency**: Under 10 seconds, digital countdown text shifts to warning red with continuous pulsing scale.
+  - **Tactile Damage Feedback**: Fullscreen red vignette flash coupled with main camera procedural recoil shake (`Camera.main.transform.DOShakePosition(0.22f, 0.16f, 15)`).
+- **Modal Transitions & End-Game Score Roll-Up**:
+  - Start Menu and End Game modals scale in with elastic `Ease.OutBack` entrances.
+  - Final score displays an animated integer roll-up counter using `DOTween.To()` from 0 to final score over 1.1s.
+- **Lighting & Post-Processing Fidelity (URP)**:
+  - Key Directional Light: Warm sunlight (`#FFF5E6`) at 1.35x intensity with filtered Soft Shadows.
+  - Ambient Trilight: Cool atmospheric sky fill (`#617594`) creating depth on real-world plane geometry.
+  - Global Volume: ACES tonemapping for wide dynamic range, Bloom for plasma projectiles, Vignette for focus, and calibrated Color Adjustments.
+- **Desktop Editor Play Mode Simulation**:
+  - `ARPlacementManager.cs` projects an automatic simulated plane reticle 2.2m ahead of the camera when running in the Editor.
+  - Spacebar or Left Mouse click instantly locks the combat zone and initiates the gameplay loop.
+  - Desktop controls support mouse aiming (right-click look), WASD strafing, and procedural weapon recoil kick.

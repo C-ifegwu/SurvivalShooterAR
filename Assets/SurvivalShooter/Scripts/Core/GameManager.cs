@@ -105,6 +105,7 @@ namespace SurvivalShooter.Core
             currentScore = 0;
             enemiesDefeated = 0;
             timeSurvived = 0f;
+            if (activeConfig == null) SetDifficulty(selectedDifficulty);
             timeRemaining = activeConfig.survivalTime;
             isTimerRunning = true;
 

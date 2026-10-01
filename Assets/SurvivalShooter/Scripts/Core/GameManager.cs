@@ -1,283 +1,178 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
-using SurvivalShooter.Audio;
+using SurvivalShooter.AR;
 using SurvivalShooter.Data;
 using SurvivalShooter.Enemies;
 using SurvivalShooter.Player;
 using SurvivalShooter.Pooling;
-using SurvivalShooter.AR;
+using SurvivalShooter.States;
 
 namespace SurvivalShooter.Core
 {
     /// <summary>
-    /// Master Game Manager implementing the State Pattern and Singleton Pattern.
-    /// Governs complete game loop (Start -> Play -> End), score tallying, time limits, and session persistence.
-    /// Coordinates seamless background music and state transitions.
+    /// Context of the State pattern + Singleton. Owns the session model and the
+    /// difficulty presets, and routes every flow request (start, pause, restart, menu).
     /// </summary>
-    public class GameManager : MonoBehaviour
+    [DefaultExecutionOrder(-100)]
+    public class GameManager : Singleton<GameManager>
     {
-        public static GameManager Instance { get; private set; }
+        [Header("Difficulty Presets (Bonus)")]
+        [SerializeField] private DifficultyConfig normal = DifficultyConfig.Normal();
+        [SerializeField] private DifficultyConfig hard = DifficultyConfig.Hard();
 
-        [Header("State & Difficulty")]
-        [SerializeField] private GameState currentState = GameState.ScanningPlanes;
-        [SerializeField] private DifficultyLevel selectedDifficulty = DifficultyLevel.Normal;
+        private readonly Dictionary<GameStateId, GameStateBase> states = new Dictionary<GameStateId, GameStateBase>();
+        private GameStateBase current;
 
-        [Header("Difficulty Presets")]
-        [SerializeField] private DifficultyConfig normalConfig = DifficultyConfig.CreateDefaultNormal();
-        [SerializeField] private DifficultyConfig hardConfig = DifficultyConfig.CreateDefaultHard();
+        public GameStateId CurrentState => current != null ? current.Id : GameStateId.MainMenu;
+        public DifficultyLevel SelectedDifficulty { get; private set; } = DifficultyLevel.Normal;
+        public DifficultyConfig ActiveConfig => SelectedDifficulty == DifficultyLevel.Hard ? hard : normal;
+        public GameSession Session { get; private set; }
+        public SessionRecord LastRecord { get; private set; }
+        public bool LastWasNewBest { get; private set; }
 
-        // Runtime Tracking
-        private int currentScore;
-        private int enemiesDefeated;
-        private float timeRemaining;
-        private float timeSurvived;
-        private bool isTimerRunning;
-        private DifficultyConfig activeConfig;
+        public DifficultyConfig GetConfig(DifficultyLevel level) => level == DifficultyLevel.Hard ? hard : normal;
 
-        // Public Properties
-        public GameState CurrentState => currentState;
-        public DifficultyLevel SelectedDifficulty => selectedDifficulty;
-        public int CurrentScore => currentScore;
-        public int EnemiesDefeated => enemiesDefeated;
-        public float TimeRemaining => timeRemaining;
-        public float TimeSurvived => timeSurvived;
-
-        private void Awake()
+        protected override void OnSingletonAwake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            Application.targetFrameRate = 60;
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
+
+            Register(new MainMenuState(this));
+            Register(new ScanningState(this));
+            Register(new CountdownState(this));
+            Register(new PlayingState(this));
+            Register(new PausedState(this));
+            Register(new GameOverState(this));
         }
+
+        private void Register(GameStateBase state) => states[state.Id] = state;
 
         private void OnEnable()
         {
-            GameEvents.OnEnemyKilled += HandleEnemyKilled;
-            GameEvents.OnPlayerDied += HandlePlayerDied;
+            GameEvents.EnemyKilled += HandleEnemyKilled;
+            GameEvents.PlayerDied += HandlePlayerDied;
         }
 
         private void OnDisable()
         {
-            GameEvents.OnEnemyKilled -= HandleEnemyKilled;
-            GameEvents.OnPlayerDied -= HandlePlayerDied;
+            GameEvents.EnemyKilled -= HandleEnemyKilled;
+            GameEvents.PlayerDied -= HandlePlayerDied;
         }
 
         private void Start()
         {
-            SetDifficulty(DifficultyLevel.Normal);
-            SetState(GameState.ScanningPlanes);
-
-            // Start ambient menu music
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayMenuBGM();
-            }
-        }
-
-        public void SetDifficulty(DifficultyLevel level)
-        {
-            selectedDifficulty = level;
-            activeConfig = (level == DifficultyLevel.Normal) ? normalConfig : hardConfig;
-            Debug.Log($"[GameManager] Difficulty selected: {level}");
-        }
-
-        public void SetState(GameState newState)
-        {
-            currentState = newState;
-            Debug.Log($"[GameManager] State changed to: {newState}");
-            GameEvents.TriggerGameStateChanged(currentState);
-        }
-
-        public void StartGamePlacementFlow()
-        {
-            SetState(GameState.ScanningPlanes);
-        }
-
-        public void OnPlacementComplete()
-        {
-            StartCombat();
-        }
-
-        public void StartCombat()
-        {
-            currentScore = 0;
-            enemiesDefeated = 0;
-            timeSurvived = 0f;
-            if (activeConfig == null) SetDifficulty(selectedDifficulty);
-            timeRemaining = activeConfig.survivalTime;
-            isTimerRunning = true;
-
-            // Apply difficulty configurations
-            if (EnemySpawner.Instance != null)
-            {
-                EnemySpawner.Instance.SetDifficultyParameters(
-                    activeConfig.spawnInterval,
-                    activeConfig.enemySpeedMultiplier,
-                    activeConfig.enemyHealthMultiplier,
-                    activeConfig.enemyDamageMultiplier
-                );
-            }
-
-            if (PlayerShooter.Instance != null)
-            {
-                PlayerShooter.Instance.SetDamage(activeConfig.playerBulletDamage);
-            }
-
-            if (PlayerHealth.Instance != null)
-            {
-                PlayerHealth.Instance.ResetHealth();
-            }
-
-            // Dispatch initial UI events
-            GameEvents.TriggerScoreChanged(currentScore);
-            GameEvents.TriggerTimeRemainingUpdated(timeRemaining);
-
-            SetState(GameState.Playing);
-
-            // Switch to high-energy combat action BGM
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayGameStart();
-                AudioManager.Instance.PlayCombatBGM();
-            }
+            ChangeState(GameStateId.MainMenu);
         }
 
         private void Update()
         {
-            if (currentState == GameState.Playing && isTimerRunning)
-            {
-                timeRemaining -= Time.deltaTime;
-                timeSurvived += Time.deltaTime;
-
-                if (timeRemaining < 0) timeRemaining = 0;
-                GameEvents.TriggerTimeRemainingUpdated(timeRemaining);
-
-                if (timeRemaining <= 0)
-                {
-                    OnVictory();
-                }
-            }
+            current?.Tick(Time.deltaTime);
         }
 
-        private void HandleEnemyKilled(EnemyType type, int scoreAwarded)
+        public void ChangeState(GameStateId next)
         {
-            if (currentState != GameState.Playing) return;
+            GameStateId previous = CurrentState;
+            if (current != null && current.Id == next) return;
 
-            enemiesDefeated++;
-            currentScore += scoreAwarded;
-            GameEvents.TriggerScoreChanged(currentScore);
+            current?.Exit(next);
+            current = states[next];
+            current.Enter(previous);
+            GameEvents.RaiseStateChanged(previous, next);
+        }
+
+        // ------------------------------------------------------------------ UI requests
+
+        public void SetDifficulty(DifficultyLevel level)
+        {
+            SelectedDifficulty = level;
+            GameEvents.RaiseDifficultyChanged(level);
+        }
+
+        public void RequestStart()
+        {
+            if (CurrentState == GameStateId.MainMenu) ChangeState(GameStateId.Scanning);
+        }
+
+        public void RequestPause()
+        {
+            if (CurrentState == GameStateId.Playing) ChangeState(GameStateId.Paused);
+        }
+
+        public void RequestResume()
+        {
+            if (CurrentState == GameStateId.Paused) ChangeState(GameStateId.Playing);
+        }
+
+        public void RequestRestart()
+        {
+            CleanUpCombat();
+            bool placed = ARPlacementManager.HasInstance && ARPlacementManager.Instance.IsArenaPlaced;
+            ChangeState(placed ? GameStateId.Countdown : GameStateId.Scanning);
+        }
+
+        public void RequestMainMenu()
+        {
+            ChangeState(GameStateId.MainMenu);
+        }
+
+        // ------------------------------------------------------------------ Session
+
+        public void BeginNewSession()
+        {
+            CleanUpCombat();
+            Session = new GameSession(ActiveConfig);
+            if (PlayerHealth.HasInstance) PlayerHealth.Instance.ResetHealth();
+            if (EnemySpawner.HasInstance) EnemySpawner.Instance.Configure(ActiveConfig);
+
+            GameEvents.RaiseScoreChanged(0, 0);
+            GameEvents.RaiseKillCountChanged(0);
+            GameEvents.RaiseTimeRemainingChanged(Session.TimeRemaining);
+        }
+
+        public void EndSession(GameResult result)
+        {
+            if (Session == null || Session.IsFinished) return;
+            int hp = PlayerHealth.HasInstance ? PlayerHealth.Instance.CurrentHealth : 0;
+            Session.Finish(result, hp);
+            ChangeState(GameStateId.GameOver);
+        }
+
+        /// <summary>All enemies wiped + every pooled projectile/effect returned.</summary>
+        public void CleanUpCombat()
+        {
+            if (EnemySpawner.HasInstance)
+            {
+                EnemySpawner.Instance.SetSpawning(false);
+                EnemySpawner.Instance.WipeAllEnemies();
+            }
+            if (PoolManager.HasInstance) PoolManager.Instance.ReleaseAll();
+            if (PlayerShooter.HasInstance) PlayerShooter.Instance.SetCombatEnabled(false);
+        }
+
+        public void SaveSessionToLeaderboard()
+        {
+            if (Session == null || !LeaderboardManager.HasInstance) return;
+            LastRecord = LeaderboardManager.Instance.Record(Session, out bool newBest);
+            LastWasNewBest = newBest;
+        }
+
+        private void HandleEnemyKilled(EnemyType type, Vector3 position, int baseScore)
+        {
+            if (CurrentState != GameStateId.Playing || Session == null) return;
+            int awarded = Session.RegisterKill(type, baseScore);
+            GameEvents.RaiseScoreChanged(Session.Score, awarded);
+            GameEvents.RaiseKillCountChanged(Session.Kills);
         }
 
         private void HandlePlayerDied()
         {
-            if (currentState != GameState.Playing) return;
-            OnGameOver();
+            if (CurrentState != GameStateId.Playing) return;
+            EndSession(GameResult.Defeated);
         }
 
-        private void OnVictory()
+        private void OnApplicationPause(bool paused)
         {
-            isTimerRunning = false;
-            SetState(GameState.Victory);
-
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayVictory();
-            }
-
-            SaveSessionToLeaderboard();
-        }
-
-        private void OnGameOver()
-        {
-            isTimerRunning = false;
-            SetState(GameState.GameOver);
-
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayDefeat();
-            }
-
-            SaveSessionToLeaderboard();
-        }
-
-        private void SaveSessionToLeaderboard()
-        {
-            if (LeaderboardManager.Instance != null)
-            {
-                LeaderboardManager.Instance.SaveSession(
-                    currentScore,
-                    enemiesDefeated,
-                    timeSurvived,
-                    selectedDifficulty.ToString()
-                );
-            }
-        }
-
-        public void RestartGame()
-        {
-            // Wipe active enemies
-            if (EnemySpawner.Instance != null)
-            {
-                EnemySpawner.Instance.WipeAllEnemies();
-            }
-
-            // Reset object pools
-            if (ObjectPoolManager.Instance != null)
-            {
-                ObjectPoolManager.Instance.ResetAllPools();
-            }
-
-            // Reset player
-            if (PlayerHealth.Instance != null)
-            {
-                PlayerHealth.Instance.ResetHealth();
-            }
-
-            // Directly begin combat if already placed, or re-trigger placement
-            if (ARPlacementManager.Instance != null && ARPlacementManager.Instance.IsObjectPlaced)
-            {
-                StartCombat();
-            }
-            else
-            {
-                if (ARPlacementManager.Instance != null)
-                {
-                    ARPlacementManager.Instance.ResetPlacement();
-                }
-                SetState(GameState.ScanningPlanes);
-            }
-        }
-
-        public void ReturnToMainMenu()
-        {
-            if (EnemySpawner.Instance != null)
-            {
-                EnemySpawner.Instance.WipeAllEnemies();
-            }
-
-            if (ObjectPoolManager.Instance != null)
-            {
-                ObjectPoolManager.Instance.ResetAllPools();
-            }
-
-            if (ARPlacementManager.Instance != null)
-            {
-                ARPlacementManager.Instance.ResetPlacement();
-            }
-
-            if (PlayerHealth.Instance != null)
-            {
-                PlayerHealth.Instance.ResetHealth();
-            }
-
-            SetState(GameState.ScanningPlanes);
-
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayMenuBGM();
-            }
+            if (paused) RequestPause();
         }
     }
 }

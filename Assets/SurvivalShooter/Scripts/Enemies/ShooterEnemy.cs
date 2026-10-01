@@ -1,88 +1,118 @@
-﻿using UnityEngine;
-using SurvivalShooter.Core;
+using System.Collections;
+using UnityEngine;
+using DG.Tweening;
 using SurvivalShooter.Audio;
+using SurvivalShooter.Core;
 using SurvivalShooter.Pooling;
 
 namespace SurvivalShooter.Enemies
 {
     /// <summary>
-    /// Concrete Shooter Enemy class (Soldier).
-    /// Maintains standoff distance and uses the Object Pooling system to fire projectile salvos.
+    /// Ranged soldier: advances until it reaches its preferred shooting distance, stops, then fires
+    /// pooled projectiles at the player after a short visible "charge" telegraph. Backs off if the
+    /// player walks too close. Longer attack range than the melee enemy.
     /// </summary>
     public class ShooterEnemy : EnemyBase
     {
-        [Header("Shooter Specifics")]
-        [SerializeField] private Transform muzzlePoint;
-        [SerializeField] private string projectilePoolTag = "EnemyProjectile";
-        [SerializeField] private float muzzleFlashDuration = 0.08f;
+        [Header("Shooter")]
+        [SerializeField] private float stopDistance = 2.4f;
+        [SerializeField] private float retreatDistance = 1.2f;
+        [SerializeField] private float projectileSpeed = 4.5f;
+        [SerializeField] private float spreadDegrees = 2f;
+        [SerializeField] private float chargeTime = 0.35f;
+        [SerializeField] private Transform muzzle;
+        [SerializeField] private Transform muzzleFlash;
+
+        private static readonly int ShootHash = Animator.StringToHash("Shoot");
+        private Vector3 flashScale;
+        private bool charging;
 
         protected override void Awake()
         {
-            enemyType = EnemyType.ShooterSoldier;
+            enemyType = EnemyType.Shooter;
             base.Awake();
-
-            if (muzzlePoint == null)
+            if (muzzleFlash != null)
             {
-                // Fallback to chest/weapon height if not assigned
-                GameObject muzzle = new GameObject("MuzzlePoint");
-                muzzle.transform.SetParent(transform);
-                muzzle.transform.localPosition = new Vector3(0.2f, 1.2f, 0.5f);
-                muzzlePoint = muzzle.transform;
+                flashScale = muzzleFlash.localScale;
+                muzzleFlash.gameObject.SetActive(false);
             }
         }
 
-        protected override void MoveToPlayer()
+        protected override void Behave(float distance, Vector3 direction)
         {
-            RotateTowardsPlayer();
+            if (charging) return;
 
-            // Advance towards standoff distance
-            transform.position += transform.forward * (moveSpeed * Time.deltaTime);
-
-            if (animator != null)
+            if (distance > stopDistance)
             {
-                animator.SetBool("IsMoving", true);
+                Move(direction);
             }
-        }
-
-        protected override void AttackPlayer()
-        {
-            RotateTowardsPlayer();
-
-            if (animator != null)
+            else if (distance < retreatDistance)
             {
-                animator.SetBool("IsMoving", false);
-                animator.SetTrigger("Shoot");
+                Move(-direction, 0.6f);
             }
 
-            FirePooledProjectile();
+            if (distance <= attackRange) TryAttack();
         }
 
-        private void FirePooledProjectile()
+        protected override void PerformAttack()
         {
-            if (playerTransform == null) return;
+            StartCoroutine(ChargeAndFire());
+        }
 
-            Vector3 spawnPos = muzzlePoint != null ? muzzlePoint.position : (transform.position + Vector3.up * 1.2f);
-            
-            // Aim at player camera center
-            Vector3 aimDirection = (playerTransform.position - spawnPos).normalized;
-            Quaternion spawnRot = Quaternion.LookRotation(aimDirection);
+        private IEnumerator ChargeAndFire()
+        {
+            charging = true;
+            if (animator != null) animator.SetTrigger(ShootHash);
 
-            // Fetch projectile from pre-allocated object pool (Zero GC allocation!)
-            GameObject projectileObj = ObjectPoolManager.Instance.SpawnFromPool(projectilePoolTag, spawnPos, spawnRot);
-            if (projectileObj != null)
+            if (muzzleFlash != null)
             {
-                PooledProjectile projectile = projectileObj.GetComponent<PooledProjectile>();
-                if (projectile != null)
+                muzzleFlash.gameObject.SetActive(true);
+                muzzleFlash.localScale = Vector3.zero;
+                muzzleFlash.DOKill();
+                muzzleFlash.DOScale(flashScale, chargeTime).SetEase(Ease.InQuad);
+            }
+
+            yield return new WaitForSeconds(chargeTime);
+            if (!IsAlive) yield break;
+
+            Fire();
+
+            if (muzzleFlash != null)
+            {
+                muzzleFlash.DOKill();
+                muzzleFlash.DOScale(flashScale * 1.8f, 0.06f).OnComplete(() =>
                 {
-                    projectile.IsPlayerProjectile = false;
-                    projectile.Damage = attackDamage;
-                }
+                    if (muzzleFlash != null) muzzleFlash.gameObject.SetActive(false);
+                });
             }
 
-            // Audio feedback
-            if (AudioManager.Instance != null)
+            yield return new WaitForSeconds(0.25f);
+            charging = false;
+        }
+
+        private void Fire()
+        {
+            if (Target == null || !PoolManager.HasInstance) return;
+            Vector3 origin = muzzle != null ? muzzle.position : AimPoint + transform.forward * 0.3f;
+            Vector3 aim = Target.position + Vector3.down * 0.08f;
+            Vector3 dir = (aim - origin).normalized;
+            dir = Quaternion.Euler(Random.Range(-spreadDegrees, spreadDegrees), Random.Range(-spreadDegrees, spreadDegrees), 0f) * dir;
+
+            Projectile p = PoolManager.Instance.SpawnProjectile(Team.Enemy, origin, Quaternion.LookRotation(dir));
+            if (p != null) p.Launch(Team.Enemy, attackDamage, projectileSpeed);
+
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.EnemyShoot, origin);
+        }
+
+        /// <summary>No death clip on this rig, so the soldier falls over procedurally.</summary>
+        protected override void PlayDeathAnimation()
+        {
+            if (muzzleFlash != null) muzzleFlash.gameObject.SetActive(false);
+            if (animator != null) animator.speed = 0.3f;
+            if (model != null)
             {
-                AudioManager.Instance.PlayEnemyShoot();
+                model.DOKill();
+                model.DOLocalRotate(new Vector3(-88f, 0f, 0f), 0.5f, RotateMode.LocalAxisAdd).SetEase(Ease.InQuad);
             }
         }
     }

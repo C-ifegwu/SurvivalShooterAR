@@ -1,32 +1,39 @@
-﻿namespace SurvivalShooter.Core
+namespace SurvivalShooter.Core
 {
-    /// <summary>
-    /// Explicit game state machine states.
-    /// </summary>
-    public enum GameState
+    /// <summary>Identifiers for every state in the game flow (Start → Play → End).</summary>
+    public enum GameStateId
     {
-        ScanningPlanes,
-        PlacementReady,
+        MainMenu,
+        Scanning,
+        Countdown,
         Playing,
-        GameOver,
-        Victory
+        Paused,
+        GameOver
     }
 
-    /// <summary>
-    /// Gameplay difficulty levels.
-    /// </summary>
+    public enum GameResult
+    {
+        None,
+        Survived,
+        Defeated
+    }
+
     public enum DifficultyLevel
     {
         Normal,
         Hard
     }
 
-    /// <summary>
-    /// Type of enemy entities.
-    /// </summary>
     public enum EnemyType
     {
-        MeleeZombie,
-        ShooterSoldier
+        Melee,
+        Shooter
+    }
+
+    /// <summary>Which side an entity/projectile belongs to (prevents friendly fire).</summary>
+    public enum Team
+    {
+        Player,
+        Enemy
     }
 }

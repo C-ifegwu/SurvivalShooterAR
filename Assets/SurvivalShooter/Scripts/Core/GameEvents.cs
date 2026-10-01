@@ -1,44 +1,67 @@
-﻿using System;
+using System;
 using UnityEngine;
 
 namespace SurvivalShooter.Core
 {
     /// <summary>
-    /// Centralized Observer/Event hub for decoupled communication
-    /// between gameplay systems and UI / Audio / Analytics.
+    /// Observer pattern hub. Gameplay systems raise events; UI, audio and the leaderboard subscribe.
+    /// No system holds a hard reference to the UI, which keeps the architecture decoupled.
     /// </summary>
     public static class GameEvents
     {
-        // Game State Events
-        public static event Action<GameState> OnGameStateChanged;
-        public static void TriggerGameStateChanged(GameState state) => OnGameStateChanged?.Invoke(state);
+        // Flow
+        public static event Action<GameStateId, GameStateId> StateChanged;   // previous, next
+        public static event Action<int> CountdownTick;                       // 3,2,1,0(=GO)
+        public static event Action<DifficultyLevel> DifficultyChanged;
 
-        // Player Events
-        public static event Action<int, int> OnPlayerHealthChanged; // current, max
-        public static void TriggerPlayerHealthChanged(int current, int max) => OnPlayerHealthChanged?.Invoke(current, max);
+        // AR
+        public static event Action<bool> PlaneStatusChanged;                  // plane under reticle?
+        public static event Action<Transform> ArenaPlaced;
 
-        public static event Action<int> OnPlayerDamaged; // damage amount
-        public static void TriggerPlayerDamaged(int damage) => OnPlayerDamaged?.Invoke(damage);
+        // Player
+        public static event Action<int, int> PlayerHealthChanged;             // current, max
+        public static event Action<int, Vector3> PlayerDamaged;               // amount, source position
+        public static event Action PlayerDied;
+        public static event Action ShotFired;
 
-        public static event Action OnPlayerDied;
-        public static void TriggerPlayerDied() => OnPlayerDied?.Invoke();
+        // Session
+        public static event Action<int, int> ScoreChanged;                    // total, delta
+        public static event Action<float> TimeRemainingChanged;
+        public static event Action<int> KillCountChanged;
 
-        // Score & Progress Events
-        public static event Action<int> OnScoreChanged;
-        public static void TriggerScoreChanged(int totalScore) => OnScoreChanged?.Invoke(totalScore);
+        // Enemies
+        public static event Action<EnemyType, Transform> EnemySpawned;
+        public static event Action<EnemyType, Vector3, bool> EnemyHit;        // type, point, killed
+        public static event Action<EnemyType, Vector3, int> EnemyKilled;      // type, position, score awarded
 
-        public static event Action<float> OnTimeRemainingUpdated;
-        public static void TriggerTimeRemainingUpdated(float timeRemaining) => OnTimeRemainingUpdated?.Invoke(timeRemaining);
+        public static void RaiseStateChanged(GameStateId prev, GameStateId next) => StateChanged?.Invoke(prev, next);
+        public static void RaiseCountdownTick(int value) => CountdownTick?.Invoke(value);
+        public static void RaiseDifficultyChanged(DifficultyLevel level) => DifficultyChanged?.Invoke(level);
+        public static void RaisePlaneStatusChanged(bool found) => PlaneStatusChanged?.Invoke(found);
+        public static void RaiseArenaPlaced(Transform arena) => ArenaPlaced?.Invoke(arena);
+        public static void RaisePlayerHealthChanged(int current, int max) => PlayerHealthChanged?.Invoke(current, max);
+        public static void RaisePlayerDamaged(int amount, Vector3 source) => PlayerDamaged?.Invoke(amount, source);
+        public static void RaisePlayerDied() => PlayerDied?.Invoke();
+        public static void RaiseShotFired() => ShotFired?.Invoke();
+        public static void RaiseScoreChanged(int total, int delta) => ScoreChanged?.Invoke(total, delta);
+        public static void RaiseTimeRemainingChanged(float seconds) => TimeRemainingChanged?.Invoke(seconds);
+        public static void RaiseKillCountChanged(int kills) => KillCountChanged?.Invoke(kills);
+        public static void RaiseEnemySpawned(EnemyType type, Transform t) => EnemySpawned?.Invoke(type, t);
+        public static void RaiseEnemyHit(EnemyType type, Vector3 point, bool killed) => EnemyHit?.Invoke(type, point, killed);
+        public static void RaiseEnemyKilled(EnemyType type, Vector3 pos, int score) => EnemyKilled?.Invoke(type, pos, score);
 
-        // Enemy Events
-        public static event Action<EnemyType, int> OnEnemyKilled; // type, scoreAwarded
-        public static void TriggerEnemyKilled(EnemyType type, int score) => OnEnemyKilled?.Invoke(type, score);
-
-        // Plane / AR Placement Events
-        public static event Action<bool> OnPlaneDetectedStatusChanged;
-        public static void TriggerPlaneDetectedStatusChanged(bool hasPlane) => OnPlaneDetectedStatusChanged?.Invoke(hasPlane);
-
-        public static event Action<Vector3> OnGameWorldPlaced;
-        public static void TriggerGameWorldPlaced(Vector3 position) => OnGameWorldPlaced?.Invoke(position);
+        /// <summary>
+        /// Domain reload is disabled in this project (fast Enter Play Mode), so static
+        /// subscribers must be cleared manually at the start of every play session.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            StateChanged = null; CountdownTick = null; DifficultyChanged = null;
+            PlaneStatusChanged = null; ArenaPlaced = null;
+            PlayerHealthChanged = null; PlayerDamaged = null; PlayerDied = null; ShotFired = null;
+            ScoreChanged = null; TimeRemainingChanged = null; KillCountChanged = null;
+            EnemySpawned = null; EnemyHit = null; EnemyKilled = null;
+        }
     }
 }

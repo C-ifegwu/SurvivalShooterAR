@@ -1,283 +1,280 @@
-﻿using System.Collections;
+using System.Collections;
 using UnityEngine;
-using SurvivalShooter.Core;
+using DG.Tweening;
 using SurvivalShooter.Audio;
+using SurvivalShooter.Core;
+using SurvivalShooter.Pooling;
 
 namespace SurvivalShooter.Enemies
 {
     /// <summary>
-    /// Abstract Base Class demonstrating Abstraction, Encapsulation, and Polymorphism.
-    /// Defines core attributes and behavior contracts for all enemy variants.
+    /// Abstract base class for every enemy.
+    /// Encapsulation: health, stats and state are private/protected and only change through methods.
+    /// Abstraction: subclasses only implement <see cref="Behave"/> and <see cref="PerformAttack"/>.
+    /// Inheritance: MeleeEnemy / ShooterEnemy reuse movement, damage, hit feedback and death.
+    /// Polymorphism: the spawner, projectiles and aim-assist treat every enemy as EnemyBase/IDamageable.
     /// </summary>
-    [RequireComponent(typeof(Collider))]
+    [RequireComponent(typeof(CapsuleCollider))]
     public abstract class EnemyBase : MonoBehaviour, IDamageable
     {
-        [Header("Enemy Classification")]
+        [Header("Identity")]
         [SerializeField] protected EnemyType enemyType;
 
-        [Header("Health & Defense")]
-        [SerializeField] protected int maxHealth = 20;
-        protected int currentHealth;
-        protected bool isDead;
-
-        [Header("Movement & Combat")]
-        [SerializeField] protected float moveSpeed = 1.2f;
-        [SerializeField] protected float attackRange = 1.5f;
-        [SerializeField] protected float attackCooldown = 1.5f;
+        [Header("Stats")]
+        [SerializeField] protected int maxHealth = 50;
+        [SerializeField] protected float moveSpeed = 0.8f;
+        [SerializeField] protected float turnSpeed = 7f;
+        [SerializeField] protected float attackRange = 0.9f;
+        [SerializeField] protected float attackCooldown = 1.3f;
         [SerializeField] protected int attackDamage = 10;
         [SerializeField] protected int scoreValue = 100;
 
-        [Header("Components & Visuals")]
+        [Header("References")]
         [SerializeField] protected Animator animator;
-        [SerializeField] protected Collider enemyCollider;
-        [SerializeField] protected Renderer[] renderers;
+        [SerializeField] protected Transform model;
+        [SerializeField] protected EnemyHealthBar healthBar;
 
-        protected Transform playerTransform;
-        protected float nextAttackTime;
-        protected Coroutine flashCoroutine;
-        private Color[] originalColors;
+        protected static readonly int SpeedHash = Animator.StringToHash("Speed");
+        protected static readonly int AttackHash = Animator.StringToHash("Attack");
+        protected static readonly int DieHash = Animator.StringToHash("Die");
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
 
-        // Public Encapsulated Properties
+        private int currentHealth;
+        private bool dead;
+        private bool active;
+        private float nextAttackTime;
+        private float floorY;
+        private float currentSpeed;
+        private Vector3 knockback;
+        private Renderer[] renderers;
+        private MaterialPropertyBlock flashBlock;
+        private CapsuleCollider capsule;
+        private Coroutine flashRoutine;
+        private Vector3 modelBaseScale;
+
+        protected Transform Target { get; private set; }
         public EnemyType Type => enemyType;
+        public Team Team => Team.Enemy;
+        public bool IsAlive => !dead;
         public int CurrentHealth => currentHealth;
         public int MaxHealth => maxHealth;
-        public bool IsDead => isDead;
-        public int ScoreValue => scoreValue;
         public float AttackRange => attackRange;
+        public int ScoreValue => scoreValue;
+        public Vector3 AimPoint => capsule != null ? transform.TransformPoint(capsule.center) : transform.position + Vector3.up * 0.6f;
+
+        // ------------------------------------------------------------------ Lifecycle
 
         protected virtual void Awake()
         {
-            if (enemyCollider == null)
-            {
-                enemyCollider = GetComponent<Collider>();
-            }
-
-            if (animator == null)
-            {
-                animator = GetComponentInChildren<Animator>();
-            }
-
-            if (renderers == null || renderers.Length == 0)
-            {
-                renderers = GetComponentsInChildren<Renderer>();
-            }
-
-            CacheOriginalColors();
-            currentHealth = maxHealth;
+            capsule = GetComponent<CapsuleCollider>();
+            if (animator == null) animator = GetComponentInChildren<Animator>();
+            if (animator != null) animator.applyRootMotion = false;
+            if (model == null && animator != null) model = animator.transform;
+            if (healthBar == null) healthBar = GetComponentInChildren<EnemyHealthBar>(true);
+            renderers = model != null ? model.GetComponentsInChildren<Renderer>() : GetComponentsInChildren<Renderer>();
+            flashBlock = new MaterialPropertyBlock();
+            modelBaseScale = model != null ? model.localScale : Vector3.one;
         }
 
-        protected virtual void Start()
+        /// <summary>Factory entry point: apply difficulty and play the spawn-in animation.</summary>
+        public virtual void Initialize(DifficultyConfig config, Transform target, float floorHeight)
         {
-            LocatePlayer();
+            moveSpeed *= config.enemySpeedMultiplier;
+            maxHealth = Mathf.RoundToInt(maxHealth * config.enemyHealthMultiplier);
+            attackDamage = Mathf.Max(1, Mathf.RoundToInt(attackDamage * config.enemyDamageMultiplier));
+            currentHealth = maxHealth;
+            Target = target;
+            floorY = floorHeight;
+            nextAttackTime = Time.time + 1.2f;
+
+            if (healthBar != null) healthBar.SetValue(1f, true);
+
+            // Spawn animation: rise + scale in, then become active.
+            active = false;
+            transform.localScale = Vector3.one * 0.01f;
+            transform.DOScale(1f, 0.55f).SetEase(Ease.OutBack).OnComplete(() => active = true);
+
+            if (PoolManager.HasInstance)
+                PoolManager.Instance.SpawnEffect(EffectType.SpawnPortal, new Vector3(transform.position.x, floorY + 0.01f, transform.position.z), Quaternion.identity);
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.EnemySpawn, transform.position);
         }
 
         protected virtual void Update()
         {
-            if (isDead) return;
+            if (dead || !active || Target == null) return;
 
-            if (playerTransform == null)
-            {
-                LocatePlayer();
-                return;
-            }
+            Vector3 flatTarget = new Vector3(Target.position.x, floorY, Target.position.z);
+            Vector3 toTarget = flatTarget - transform.position;
+            toTarget.y = 0f;
+            float distance = toTarget.magnitude;
 
-            float distanceToPlayer = GetHorizontalDistanceToPlayer();
+            FaceDirection(toTarget);
+            currentSpeed = 0f;
+            Behave(distance, toTarget.normalized);   // Template method → subclass decides
 
-            if (distanceToPlayer > attackRange)
+            // knock-back decay + stay glued to the floor
+            if (knockback.sqrMagnitude > 0.0001f)
             {
-                MoveToPlayer();
+                transform.position += knockback * Time.deltaTime;
+                knockback = Vector3.Lerp(knockback, Vector3.zero, 10f * Time.deltaTime);
             }
-            else
-            {
-                RotateTowardsPlayer();
-                if (Time.time >= nextAttackTime)
-                {
-                    nextAttackTime = Time.time + attackCooldown;
-                    AttackPlayer();
-                }
-            }
+            Vector3 p = transform.position;
+            p.y = floorY;
+            transform.position = p;
+
+            if (animator != null) animator.SetFloat(SpeedHash, currentSpeed, 0.1f, Time.deltaTime);
         }
 
-        protected void LocatePlayer()
+        // ------------------------------------------------------------------ Abstract behaviour
+
+        /// <summary>Per-frame AI decided by each concrete enemy.</summary>
+        protected abstract void Behave(float distanceToTarget, Vector3 directionToTarget);
+
+        /// <summary>The concrete attack (melee strike / projectile).</summary>
+        protected abstract void PerformAttack();
+
+        // ------------------------------------------------------------------ Shared helpers
+
+        protected void Move(Vector3 direction, float speedFactor = 1f)
         {
-            if (Camera.main != null)
-            {
-                playerTransform = Camera.main.transform;
-            }
+            Vector3 separation = EnemySpawner.HasInstance ? EnemySpawner.Instance.GetSeparation(this) : Vector3.zero;
+            Vector3 velocity = (direction * speedFactor + separation) * moveSpeed;
+            velocity.y = 0f;
+            transform.position += velocity * Time.deltaTime;
+            currentSpeed = Mathf.Abs(speedFactor);
         }
 
-        protected float GetHorizontalDistanceToPlayer()
+        protected void FaceDirection(Vector3 dir)
         {
-            if (playerTransform == null) return float.MaxValue;
-            Vector3 playerFlat = new Vector3(playerTransform.position.x, transform.position.y, playerTransform.position.z);
-            return Vector3.Distance(transform.position, playerFlat);
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 0.0001f) return;
+            Quaternion look = Quaternion.LookRotation(dir.normalized, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, look, turnSpeed * Time.deltaTime);
         }
 
-        protected void RotateTowardsPlayer()
+        protected bool AttackReady => Time.time >= nextAttackTime;
+
+        protected void TryAttack()
         {
-            if (playerTransform == null) return;
-            Vector3 direction = (playerTransform.position - transform.position);
-            direction.y = 0; // Lock to plane horizontal orientation
-            if (direction.sqrMagnitude > 0.001f)
-            {
-                Quaternion targetRot = Quaternion.LookRotation(direction);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * 8f);
-            }
+            if (!AttackReady) return;
+            nextAttackTime = Time.time + attackCooldown;
+            PerformAttack();
         }
 
-        // ================= Abstract Methods for Polymorphism =================
-
-        /// <summary>
-        /// Specific locomotion logic implemented by derived enemy classes.
-        /// </summary>
-        protected abstract void MoveToPlayer();
-
-        /// <summary>
-        /// Specific attack logic (Melee strike vs Projectile shot) implemented by derived classes.
-        /// </summary>
-        protected abstract void AttackPlayer();
-
-        // ================= Damage & Hit Feedback =================
-
-        public virtual void TakeDamage(int damageAmount, Vector3 hitPoint, Vector3 hitNormal)
+        protected float HorizontalDistanceToTarget()
         {
-            if (isDead) return;
-
-            currentHealth -= damageAmount;
-            PlayHitFeedback();
-
-            if (currentHealth <= 0)
-            {
-                currentHealth = 0;
-                Die();
-            }
+            if (Target == null) return float.MaxValue;
+            Vector3 a = transform.position; a.y = 0f;
+            Vector3 b = Target.position; b.y = 0f;
+            return Vector3.Distance(a, b);
         }
 
-        protected virtual void PlayHitFeedback()
-        {
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayEnemyHurt();
-            }
+        // ------------------------------------------------------------------ Damage / feedback
 
-            if (flashCoroutine != null)
-            {
-                StopCoroutine(flashCoroutine);
-            }
-            flashCoroutine = StartCoroutine(HitFlashRoutine());
+        public virtual void TakeDamage(DamageInfo info)
+        {
+            if (dead || info.SourceTeam == Team.Enemy) return;
+
+            currentHealth = Mathf.Max(0, currentHealth - info.Amount);
+            bool killed = currentHealth <= 0;
+
+            if (healthBar != null) healthBar.SetValue((float)currentHealth / maxHealth);
+            PlayHitFeedback(info);
+            GameEvents.RaiseEnemyHit(enemyType, info.Point, killed);
+
+            if (killed) Die();
         }
 
-        private IEnumerator HitFlashRoutine()
+        protected virtual void PlayHitFeedback(DamageInfo info)
         {
-            SetRenderersColor(Color.red);
-            yield return new WaitForSeconds(0.12f);
-            RestoreOriginalColors();
-            flashCoroutine = null;
+            Vector3 push = info.Direction; push.y = 0f;
+            knockback += push.normalized * 0.9f;
+
+            if (flashRoutine != null) StopCoroutine(flashRoutine);
+            flashRoutine = StartCoroutine(FlashRoutine());
+
+            if (model != null)
+            {
+                model.DOKill(true);
+                model.localScale = modelBaseScale;
+                model.DOPunchScale(modelBaseScale * 0.12f, 0.18f, 6, 0.6f);
+            }
+
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.EnemyHurt, transform.position);
+        }
+
+        private IEnumerator FlashRoutine()
+        {
+            Color flash = new Color(1.7f, 0.75f, 0.7f, 1f);
+            SetFlash(flash);
+            yield return new WaitForSeconds(0.07f);
+            SetFlash(new Color(1.3f, 0.45f, 0.45f, 1f));
+            yield return new WaitForSeconds(0.06f);
+            ClearFlash();
+            flashRoutine = null;
+        }
+
+        private void SetFlash(Color c)
+        {
+            flashBlock.Clear();
+            flashBlock.SetColor(BaseColorId, c);
+            flashBlock.SetColor(ColorId, c);
+            foreach (var r in renderers) if (r != null) r.SetPropertyBlock(flashBlock);
+        }
+
+        private void ClearFlash()
+        {
+            flashBlock.Clear();
+            foreach (var r in renderers) if (r != null) r.SetPropertyBlock(null);
         }
 
         protected virtual void Die()
         {
-            if (isDead) return;
-            isDead = true;
+            if (dead) return;
+            dead = true;
+            StopAllCoroutines();
+            ClearFlash();
+            capsule.enabled = false;
+            if (healthBar != null) healthBar.Hide();
 
-            if (enemyCollider != null)
-            {
-                enemyCollider.enabled = false;
-            }
+            if (PoolManager.HasInstance) PoolManager.Instance.SpawnEffect(EffectType.DeathBurst, AimPoint, Quaternion.identity);
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.EnemyDeath, transform.position);
+            GameEvents.RaiseEnemyKilled(enemyType, transform.position, scoreValue);
 
-            if (animator != null)
-            {
-                animator.SetTrigger("Die");
-            }
-
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayEnemyDeath();
-            }
-
-            // Fire observer event for UI, score, and leaderboard tallying
-            GameEvents.TriggerEnemyKilled(enemyType, scoreValue);
-
-            // Despawn after animation completes
-            StartCoroutine(DespawnAfterDelay(2.0f));
+            PlayDeathAnimation();
+            StartCoroutine(SinkAndDestroy(1.6f));
         }
 
-        protected IEnumerator DespawnAfterDelay(float delay)
+        /// <summary>Subclasses decide how the body reacts (animation clip vs procedural fall).</summary>
+        protected virtual void PlayDeathAnimation()
+        {
+            if (animator != null) animator.SetTrigger(DieHash);
+        }
+
+        private IEnumerator SinkAndDestroy(float delay)
         {
             yield return new WaitForSeconds(delay);
+            transform.DOKill();
+            transform.DOScale(0f, 0.45f).SetEase(Ease.InBack);
+            yield return new WaitForSeconds(0.5f);
             Destroy(gameObject);
         }
 
-        /// <summary>
-        /// Instantly removes enemy during game-over or restart without triggering death rewards.
-        /// </summary>
-        public virtual void Wipe()
+        /// <summary>Instant removal on game end/restart — no score, no effects.</summary>
+        public void Wipe()
         {
+            dead = true;
             StopAllCoroutines();
+            transform.DOKill();
+            if (model != null) model.DOKill();
             Destroy(gameObject);
         }
 
-        public virtual void Initialize(float speedMultiplier, float healthMultiplier, float damageMultiplier)
+        protected virtual void OnDestroy()
         {
-            moveSpeed *= speedMultiplier;
-            maxHealth = Mathf.RoundToInt(maxHealth * healthMultiplier);
-            currentHealth = maxHealth;
-            attackDamage = Mathf.RoundToInt(attackDamage * damageMultiplier);
-        }
-
-        private void CacheOriginalColors()
-        {
-            if (renderers == null) return;
-            originalColors = new Color[renderers.Length];
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                if (renderers[i] != null && renderers[i].material.HasProperty("_BaseColor"))
-                {
-                    originalColors[i] = renderers[i].material.GetColor("_BaseColor");
-                }
-                else if (renderers[i] != null && renderers[i].material.HasProperty("_Color"))
-                {
-                    originalColors[i] = renderers[i].material.GetColor("_Color");
-                }
-                else
-                {
-                    originalColors[i] = Color.white;
-                }
-            }
-        }
-
-        private void SetRenderersColor(Color color)
-        {
-            if (renderers == null) return;
-            foreach (var r in renderers)
-            {
-                if (r == null) continue;
-                if (r.material.HasProperty("_BaseColor"))
-                {
-                    r.material.SetColor("_BaseColor", color);
-                }
-                else if (r.material.HasProperty("_Color"))
-                {
-                    r.material.SetColor("_Color", color);
-                }
-            }
-        }
-
-        private void RestoreOriginalColors()
-        {
-            if (renderers == null || originalColors == null) return;
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                if (renderers[i] == null) continue;
-                if (renderers[i].material.HasProperty("_BaseColor"))
-                {
-                    renderers[i].material.SetColor("_BaseColor", originalColors[i]);
-                }
-                else if (renderers[i].material.HasProperty("_Color"))
-                {
-                    renderers[i].material.SetColor("_Color", originalColors[i]);
-                }
-            }
+            transform.DOKill();
+            if (model != null) model.DOKill();
         }
     }
 }

@@ -1,80 +1,81 @@
-﻿using UnityEngine;
-using SurvivalShooter.Core;
+using UnityEngine;
 using SurvivalShooter.Audio;
+using SurvivalShooter.Core;
 
 namespace SurvivalShooter.Player
 {
     /// <summary>
-    /// Player Health system implementing IDamageable with reactive event dispatching.
-    /// Provides screen damage feedback and triggers game-over upon death.
+    /// Player health (lives on the AR camera = first-person player).
+    /// A small sphere collider on the camera is what enemy projectiles hit.
+    /// Raises events for the HUD (health bar, damage vignette) and triggers Game Over on death.
     /// </summary>
-    public class PlayerHealth : MonoBehaviour, IDamageable
+    [RequireComponent(typeof(SphereCollider))]
+    public class PlayerHealth : Singleton<PlayerHealth>, IDamageable
     {
-        public static PlayerHealth Instance { get; private set; }
-
-        [Header("Health Attributes")]
         [SerializeField] private int maxHealth = 100;
-        private int currentHealth;
-        private bool isDead;
+        [SerializeField] private float hurtSoundCooldown = 0.25f;
 
+        /// <summary>Editor test hook: damage events still fire but health is not reduced.</summary>
+        public static bool DebugInvulnerable;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => DebugInvulnerable = false;
+
+        private int currentHealth;
+        private bool dead;
+        private float nextHurtSound;
+
+        public Team Team => Team.Player;
+        public bool IsAlive => !dead;
         public int CurrentHealth => currentHealth;
         public int MaxHealth => maxHealth;
-        public bool IsDead => isDead;
+        public float Health01 => maxHealth > 0 ? (float)currentHealth / maxHealth : 0f;
 
-        private void Awake()
+        protected override void OnSingletonAwake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
-
             currentHealth = maxHealth;
+            var col = GetComponent<SphereCollider>();
+            col.isTrigger = false;
         }
 
-        private void Start()
+        private void Start() => GameEvents.RaisePlayerHealthChanged(currentHealth, maxHealth);
+
+        public void TakeDamage(DamageInfo info)
         {
-            GameEvents.TriggerPlayerHealthChanged(currentHealth, maxHealth);
-        }
+            if (dead || info.SourceTeam == Team.Player) return;
+            if (GameManager.HasInstance && GameManager.Instance.CurrentState != GameStateId.Playing) return;
 
-        public void TakeDamage(int damageAmount, Vector3 hitPoint, Vector3 hitNormal)
-        {
-            if (isDead) return;
+            if (!DebugInvulnerable) currentHealth = Mathf.Max(0, currentHealth - info.Amount);
+            Vector3 source = info.Point - info.Direction;
+            GameEvents.RaisePlayerDamaged(info.Amount, source);
+            GameEvents.RaisePlayerHealthChanged(currentHealth, maxHealth);
 
-            currentHealth = Mathf.Max(0, currentHealth - damageAmount);
-            Debug.Log($"[PlayerHealth] Player damaged: -{damageAmount} HP. Remaining: {currentHealth}/{maxHealth}");
-
-            // Notify UI & camera shake observers
-            GameEvents.TriggerPlayerDamaged(damageAmount);
-            GameEvents.TriggerPlayerHealthChanged(currentHealth, maxHealth);
-
-            if (currentHealth <= 0)
+            if (AudioManager.HasInstance && Time.time >= nextHurtSound)
             {
-                Die();
+                nextHurtSound = Time.time + hurtSoundCooldown;
+                AudioManager.Instance.Play(SoundId.PlayerHurt);
             }
+
+#if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
+            if (currentHealth > 0 && info.Amount >= 10) Handheld.Vibrate();
+#endif
+
+            if (currentHealth <= 0) Die();
         }
 
         private void Die()
         {
-            if (isDead) return;
-            isDead = true;
-
-            Debug.Log("[PlayerHealth] Player killed! Triggering Game Over.");
-
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayPlayerDeath();
-            }
-
-            GameEvents.TriggerPlayerDied();
+            if (dead) return;
+            dead = true;
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.PlayerDeath);
+            GameEvents.RaisePlayerDied();
         }
 
         public void ResetHealth()
         {
-            isDead = false;
+            dead = false;
             currentHealth = maxHealth;
-            GameEvents.TriggerPlayerHealthChanged(currentHealth, maxHealth);
+            GameEvents.RaisePlayerHealthChanged(currentHealth, maxHealth);
         }
     }
 }

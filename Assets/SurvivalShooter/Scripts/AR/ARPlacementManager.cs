@@ -1,253 +1,216 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
-using DG.Tweening;
+using UnityEngine.XR.Management;
+using SurvivalShooter.Audio;
 using SurvivalShooter.Core;
 
 namespace SurvivalShooter.AR
 {
     /// <summary>
-    /// Handles AR Plane detection, Placement Reticle tracking, and Tap-to-Place functionality.
-    /// Strictly guarantees single-placement constraint and disables plane detection post-placement.
-    /// Includes complete Unity Editor Play Mode simulation for rapid desktop testing.
+    /// Horizontal plane detection + tap-to-place.
+    /// - A reticle follows the detected plane under the screen centre.
+    /// - One tap places the combat arena; the arena is parented to an ARAnchor so it stays locked
+    ///   to the real world. Further taps are ignored (single-instance rule).
+    /// - After placement, detection of new planes is switched off (optional requirement).
+    /// In the Editor without XR Simulation, a virtual floor is used so the loop can still be tested.
     /// </summary>
-    public class ARPlacementManager : MonoBehaviour
+    [DefaultExecutionOrder(-80)]
+    public class ARPlacementManager : Singleton<ARPlacementManager>
     {
-        public static ARPlacementManager Instance { get; private set; }
-
-        [Header("AR Foundation References")]
+        [Header("AR Foundation")]
         [SerializeField] private ARRaycastManager raycastManager;
         [SerializeField] private ARPlaneManager planeManager;
+        [SerializeField] private ARAnchorManager anchorManager;
+        [SerializeField] private Camera arCamera;
 
-        [Header("Placement Visuals")]
-        [SerializeField] private GameObject placementIndicatorPrefab;
-        [SerializeField] private GameObject combatArenaPrefab;
+        [Header("Visuals")]
+        [SerializeField] private PlacementReticle reticlePrefab;
+        [SerializeField] private GameObject arenaPrefab;
 
-        private GameObject placementIndicatorInstance;
-        private Pose currentPlacementPose;
-        private bool isPlaneDetected;
-        private bool isObjectPlaced;
-        private readonly List<ARRaycastHit> raycastHits = new List<ARRaycastHit>();
-        private Tween reticlePulseTween;
+#pragma warning disable 0414 // only used in Editor/Standalone builds
+        [Header("Editor Fallback")]
+        [SerializeField] private float fallbackFloorOffset = 1.4f;
+        [SerializeField] private float fallbackDelay = 1.5f;
+#pragma warning restore 0414
 
-        public bool IsObjectPlaced => isObjectPlaced;
-        public bool IsPlaneDetected => isPlaneDetected;
+        private static readonly List<ARRaycastHit> Hits = new List<ARRaycastHit>();
 
-        private void Awake()
+        private PlacementReticle reticle;
+        private GameObject anchorObject;
+        private Transform arenaRoot;
+        private bool placementEnabled;
+        private bool hasPose;
+        private Pose pose;
+        private float scanTimer;
+        private bool usingFallback;
+
+        public Action ArenaPlacedCallback { get; set; }
+        public bool IsArenaPlaced => arenaRoot != null;
+        public Transform ArenaRoot => arenaRoot;
+        public float FloorHeight { get; private set; }
+        public bool UsingDesktopFallback => usingFallback;
+        public Camera ARCamera => arCamera != null ? arCamera : Camera.main;
+
+        protected override void OnSingletonAwake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            if (arCamera == null) arCamera = Camera.main;
+            if (raycastManager == null) raycastManager = FindAnyObjectByType<ARRaycastManager>();
+            if (planeManager == null) planeManager = FindAnyObjectByType<ARPlaneManager>();
+            if (anchorManager == null) anchorManager = FindAnyObjectByType<ARAnchorManager>();
 
-            if (raycastManager == null)
+            if (reticlePrefab != null)
             {
-                raycastManager = FindFirstObjectByType<ARRaycastManager>();
-            }
-
-            if (planeManager == null)
-            {
-                planeManager = FindFirstObjectByType<ARPlaneManager>();
+                reticle = Instantiate(reticlePrefab);
+                reticle.name = "PlacementReticle";
+                reticle.SetVisible(false, true);
             }
         }
 
-        private void Start()
+        /// <summary>True when a real AR (or XR Simulation) session is running.</summary>
+        public static bool IsXRRunning
         {
-            if (placementIndicatorPrefab != null)
+            get
             {
-                placementIndicatorInstance = Instantiate(placementIndicatorPrefab);
-                placementIndicatorInstance.SetActive(false);
-
-                // Add visual reticle pulsing animation
-                reticlePulseTween = placementIndicatorInstance.transform.DOScale(1.08f, 0.75f)
-                    .SetEase(Ease.InOutSine)
-                    .SetLoops(-1, LoopType.Yoyo)
-                    .SetUpdate(true);
+                var settings = XRGeneralSettings.Instance;
+                return settings != null && settings.Manager != null && settings.Manager.activeLoader != null
+                       && ARSession.state >= ARSessionState.SessionInitializing;
             }
         }
 
-        private void OnDestroy()
+        public void SetPlacementEnabled(bool enabled)
         {
-            reticlePulseTween?.Kill();
+            placementEnabled = enabled && !IsArenaPlaced;
+            scanTimer = 0f;
+            if (!placementEnabled)
+            {
+                if (reticle != null) reticle.SetVisible(false);
+                SetHasPose(false, true);
+            }
         }
 
         private void Update()
         {
-            if (isObjectPlaced)
+            if (!placementEnabled || IsArenaPlaced) return;
+
+            scanTimer += Time.deltaTime;
+            UpdatePose();
+
+            if (reticle != null)
             {
-                if (placementIndicatorInstance != null && placementIndicatorInstance.activeSelf)
-                {
-                    placementIndicatorInstance.SetActive(false);
-                }
-                return;
+                reticle.SetVisible(hasPose);
+                if (hasPose) reticle.Follow(pose);
             }
 
-            UpdatePlacementPose();
-            UpdatePlacementIndicator();
-            CheckForTapToPlace();
-        }
-
-        private void UpdatePlacementPose()
-        {
-            bool hitPlane = false;
-
-            if (raycastManager != null)
+            if (hasPose && PointerInput.WorldTapThisFrame(out _))
             {
-                Vector2 screenCenter = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-                if (raycastManager.Raycast(screenCenter, raycastHits, TrackableType.PlaneWithinPolygon))
-                {
-                    currentPlacementPose = raycastHits[0].pose;
-                    hitPlane = true;
-                }
-            }
-
-            #if UNITY_EDITOR || UNITY_STANDALONE
-            // Desktop Editor Play Mode Fallback: Automatically simulate floor plane in front of camera
-            if (!hitPlane)
-            {
-                Camera cam = Camera.main;
-                if (cam != null)
-                {
-                    Vector3 forwardFloor = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up).normalized;
-                    if (forwardFloor.sqrMagnitude < 0.01f) forwardFloor = Vector3.forward;
-
-                    currentPlacementPose.position = cam.transform.position + forwardFloor * 2.2f + Vector3.down * 0.8f;
-                    currentPlacementPose.rotation = Quaternion.LookRotation(forwardFloor, Vector3.up);
-                    hitPlane = true;
-                }
-            }
-            #endif
-
-            SetPlaneDetected(hitPlane);
-        }
-
-        private void SetPlaneDetected(bool detected)
-        {
-            if (isPlaneDetected != detected)
-            {
-                isPlaneDetected = detected;
-                GameEvents.TriggerPlaneDetectedStatusChanged(isPlaneDetected);
+                PlaceArena(pose);
             }
         }
 
-        private void UpdatePlacementIndicator()
+        private void UpdatePose()
         {
-            if (placementIndicatorInstance == null) return;
+            bool found = false;
+            Camera cam = ARCamera;
 
-            if (isPlaneDetected && !isObjectPlaced)
+            if (raycastManager != null && cam != null && IsXRRunning)
             {
-                if (!placementIndicatorInstance.activeSelf)
+                Vector2 centre = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+                if (raycastManager.Raycast(centre, Hits, TrackableType.PlaneWithinPolygon))
                 {
-                    placementIndicatorInstance.SetActive(true);
-                }
-                placementIndicatorInstance.transform.SetPositionAndRotation(currentPlacementPose.position, currentPlacementPose.rotation);
-            }
-            else
-            {
-                if (placementIndicatorInstance.activeSelf)
-                {
-                    placementIndicatorInstance.SetActive(false);
-                }
-            }
-        }
-
-        private void CheckForTapToPlace()
-        {
-            if (!isPlaneDetected || isObjectPlaced) return;
-
-            bool tapTriggered = false;
-
-            #if UNITY_EDITOR || UNITY_STANDALONE
-            // In Editor, click anywhere in game view or press Space/Enter to place
-            if (Input.GetMouseButtonDown(0))
-            {
-                if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject())
-                {
-                    tapTriggered = true;
-                }
-            }
-            else if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))
-            {
-                tapTriggered = true;
-            }
-            #else
-            if (Input.touchCount > 0)
-            {
-                Touch touch = Input.GetTouch(0);
-                if (touch.phase == TouchPhase.Began)
-                {
-                    if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                    foreach (var hit in Hits)
                     {
-                        tapTriggered = true;
+                        if (hit.trackable is ARPlane plane && plane.alignment != PlaneAlignment.HorizontalUp) continue;
+                        pose = hit.pose;
+                        found = true;
+                        break;
                     }
                 }
             }
-            #endif
 
-            if (tapTriggered)
+#if UNITY_EDITOR || UNITY_STANDALONE
+            // Desktop fallback: no AR session at all → virtual floor under the camera.
+            usingFallback = !IsXRRunning && scanTimer > fallbackDelay;
+            if (!found && usingFallback && cam != null)
             {
-                PlaceGameWorld(currentPlacementPose.position, currentPlacementPose.rotation);
+                Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f));
+                Plane floor = new Plane(Vector3.up, new Vector3(0f, cam.transform.position.y - fallbackFloorOffset, 0f));
+                if (floor.Raycast(ray, out float dist) && dist < 8f)
+                {
+                    pose = new Pose(ray.GetPoint(dist), Quaternion.identity);
+                    found = true;
+                }
             }
+#endif
+            if (found && cam != null)
+            {
+                // Face the arena towards the player.
+                Vector3 toCam = cam.transform.position - pose.position;
+                toCam.y = 0f;
+                if (toCam.sqrMagnitude > 0.001f) pose.rotation = Quaternion.LookRotation(toCam.normalized, Vector3.up);
+            }
+
+            SetHasPose(found);
         }
 
-        public void PlaceGameWorld(Vector3 position, Quaternion rotation)
+        private void SetHasPose(bool value, bool force = false)
         {
-            if (isObjectPlaced) return; // Strict single-instance constraint
+            if (hasPose == value && !force) return;
+            hasPose = value;
+            GameEvents.RaisePlaneStatusChanged(value);
+            if (value && AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.PlaneFound);
+        }
 
-            isObjectPlaced = true;
-            Debug.Log($"[ARPlacementManager] Combat Zone successfully anchored at {position}. Locking plane tracking.");
+        public void PlaceArena(Pose placePose)
+        {
+            if (IsArenaPlaced) return; // single-instance constraint
 
-            // Spawn visual arena bounds/perimeter if assigned
-            if (combatArenaPrefab != null)
+            anchorObject = new GameObject("ArenaAnchor");
+            anchorObject.transform.SetPositionAndRotation(placePose.position, placePose.rotation);
+            if (IsXRRunning && anchorManager != null)
             {
-                Instantiate(combatArenaPrefab, position, rotation);
+                anchorObject.AddComponent<ARAnchor>(); // world-locks the arena
             }
 
-            // Hide placement reticle
-            if (placementIndicatorInstance != null)
-            {
-                placementIndicatorInstance.SetActive(false);
-            }
+            GameObject arena = arenaPrefab != null
+                ? Instantiate(arenaPrefab, anchorObject.transform)
+                : new GameObject("CombatArena");
+            arena.transform.SetParent(anchorObject.transform, false);
+            arena.transform.localPosition = Vector3.zero;
+            arena.transform.localRotation = Quaternion.identity;
+            arenaRoot = arena.transform;
+            FloorHeight = placePose.position.y;
 
-            // Stop detecting new planes to lock the combat environment
-            if (planeManager != null)
-            {
-                planeManager.requestedDetectionMode = PlaneDetectionMode.None;
-            }
+            placementEnabled = false;
+            if (reticle != null) reticle.SetVisible(false);
 
-            // Dispatch global events
-            GameEvents.TriggerGameWorldPlaced(position);
+            // Optional requirement: stop detecting new planes once the game is placed.
+            // Disabling the manager stops the plane subsystem but keeps the already-detected
+            // planes (and their colliders) frozen in place, so the tracker stays visible under the arena.
+            if (planeManager != null) planeManager.enabled = false;
+            CustomPlaneVisualizer.SetArenaMode(true);
 
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.OnPlacementComplete();
-            }
+            if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.ArenaPlaced);
+            GameEvents.RaiseArenaPlaced(arenaRoot);
+            ArenaPlacedCallback?.Invoke();
         }
 
         public void ResetPlacement()
         {
-            isObjectPlaced = false;
-            isPlaneDetected = false;
-
+            if (anchorObject != null) Destroy(anchorObject);
+            anchorObject = null;
+            arenaRoot = null;
             if (planeManager != null)
             {
                 planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
+                planeManager.enabled = true;
             }
-
-            if (placementIndicatorInstance != null)
-            {
-                placementIndicatorInstance.SetActive(false);
-            }
+            CustomPlaneVisualizer.SetArenaMode(false);
         }
 
-        public void ConfigurePrefabs(GameObject reticle, GameObject arena = null)
-        {
-            placementIndicatorPrefab = reticle;
-            combatArenaPrefab = arena;
-        }
+        /// <summary>Arena floor point projected under the given world position.</summary>
+        public Vector3 ProjectToFloor(Vector3 world) => new Vector3(world.x, FloorHeight, world.z);
     }
 }

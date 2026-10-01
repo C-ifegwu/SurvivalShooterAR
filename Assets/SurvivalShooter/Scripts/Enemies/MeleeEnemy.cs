@@ -1,69 +1,55 @@
-﻿using UnityEngine;
-using SurvivalShooter.Core;
+using System.Collections;
+using UnityEngine;
 using SurvivalShooter.Audio;
+using SurvivalShooter.Core;
 using SurvivalShooter.Player;
 
 namespace SurvivalShooter.Enemies
 {
     /// <summary>
-    /// Concrete Melee Enemy class (Zombie).
-    /// Exhibits high aggression, short attack range, and ferocious close-quarter strikes.
+    /// Melee zombie: walks straight at the player, short attack range, deals damage ONLY when
+    /// still within close proximity at the moment the strike lands, then waits for its cooldown.
     /// </summary>
     public class MeleeEnemy : EnemyBase
     {
-        [Header("Melee Specifics")]
-        [SerializeField] private float strikeDelay = 0.35f;
+        [Header("Melee")]
+        [SerializeField] private float strikeWindup = 0.5f;
+        [SerializeField] private float strikeReachBonus = 0.25f;
 
         protected override void Awake()
         {
-            enemyType = EnemyType.MeleeZombie;
+            enemyType = EnemyType.Melee;
             base.Awake();
         }
 
-        protected override void MoveToPlayer()
+        protected override void Behave(float distance, Vector3 direction)
         {
-            RotateTowardsPlayer();
-
-            // Translate forward on plane
-            transform.position += transform.forward * (moveSpeed * Time.deltaTime);
-
-            if (animator != null)
+            if (distance > attackRange)
             {
-                animator.SetBool("IsMoving", true);
+                Move(direction);
+            }
+            else
+            {
+                TryAttack();
             }
         }
 
-        protected override void AttackPlayer()
+        protected override void PerformAttack()
         {
-            if (animator != null)
-            {
-                animator.SetBool("IsMoving", false);
-                animator.SetTrigger("Attack");
-            }
-
-            // Play melee bite/growl attack sound
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayEnemyMeleeDamage();
-            }
-
-            // Inflict damage with slight animation synchronization
-            StartCoroutine(ExecuteMeleeStrike());
+            if (animator != null) animator.SetTrigger(AttackHash);
+            StartCoroutine(Strike());
         }
 
-        private System.Collections.IEnumerator ExecuteMeleeStrike()
+        private IEnumerator Strike()
         {
-            yield return new WaitForSeconds(strikeDelay);
+            yield return new WaitForSeconds(strikeWindup);
+            if (!IsAlive) yield break;
 
-            if (isDead) yield break;
-
-            if (GetHorizontalDistanceToPlayer() <= attackRange + 0.5f)
+            // Proximity check at impact time: stepping back dodges the hit.
+            if (HorizontalDistanceToTarget() <= attackRange + strikeReachBonus && PlayerHealth.HasInstance)
             {
-                PlayerHealth player = PlayerHealth.Instance;
-                if (player != null && !player.IsDead)
-                {
-                    player.TakeDamage(attackDamage, transform.position, transform.forward);
-                }
+                if (AudioManager.HasInstance) AudioManager.Instance.Play(SoundId.MeleeAttack, transform.position);
+                PlayerHealth.Instance.TakeDamage(new DamageInfo(attackDamage, AimPoint, transform.forward, Team.Enemy));
             }
         }
     }

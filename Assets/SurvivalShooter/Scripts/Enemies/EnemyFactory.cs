@@ -1,55 +1,48 @@
-﻿using UnityEngine;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
 using SurvivalShooter.Core;
 
 namespace SurvivalShooter.Enemies
 {
     /// <summary>
-    /// Factory Pattern implementation for enemy instantiation and parameterization.
-    /// Abstracts prefab references and applies difficulty scalers dynamically.
+    /// Factory pattern: callers ask for an EnemyType; the factory knows which prefab to build,
+    /// where to parent it and how to initialise it. The spawner never touches prefabs directly.
     /// </summary>
-    public class EnemyFactory : MonoBehaviour
+    public class EnemyFactory : Singleton<EnemyFactory>
     {
-        public static EnemyFactory Instance { get; private set; }
-
-        [Header("Enemy Prefab Variants")]
-        [SerializeField] private GameObject meleeZombiePrefab;
-        [SerializeField] private GameObject shooterSoldierPrefab;
-
-        private void Awake()
+        [Serializable]
+        public struct Entry
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            public EnemyType type;
+            public EnemyBase prefab;
         }
 
-        public EnemyBase CreateEnemy(EnemyType type, Vector3 position, Quaternion rotation, float speedMult, float healthMult, float damageMult)
-        {
-            GameObject prefabToSpawn = (type == EnemyType.MeleeZombie) ? meleeZombiePrefab : shooterSoldierPrefab;
+        [SerializeField] private Entry[] prefabs;
 
-            if (prefabToSpawn == null)
+        private readonly Dictionary<EnemyType, EnemyBase> map = new Dictionary<EnemyType, EnemyBase>();
+
+        protected override void OnSingletonAwake()
+        {
+            foreach (var e in prefabs)
             {
-                Debug.LogError($"[EnemyFactory] Prefab for {type} is not assigned!");
+                if (e.prefab != null) map[e.type] = e.prefab;
+            }
+        }
+
+        public EnemyBase Create(EnemyType type, Vector3 position, Quaternion rotation, Transform parent,
+                                DifficultyConfig config, Transform target, float floorHeight)
+        {
+            if (!map.TryGetValue(type, out EnemyBase prefab))
+            {
+                Debug.LogError($"[EnemyFactory] No prefab registered for {type}");
                 return null;
             }
 
-            GameObject instance = Instantiate(prefabToSpawn, position, rotation);
-            EnemyBase enemy = instance.GetComponent<EnemyBase>();
-
-            if (enemy != null)
-            {
-                enemy.Initialize(speedMult, healthMult, damageMult);
-            }
-
+            EnemyBase enemy = Instantiate(prefab, position, rotation, parent);
+            enemy.name = $"{type}_{Time.frameCount}";
+            enemy.Initialize(config, target, floorHeight);
             return enemy;
-        }
-
-        public void SetPrefabs(GameObject meleePrefab, GameObject shooterPrefab)
-        {
-            meleeZombiePrefab = meleePrefab;
-            shooterSoldierPrefab = shooterPrefab;
         }
     }
 }
